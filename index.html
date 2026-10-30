@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nightshade Garden</title>
+<meta name="description" content="An interactive ASCII garden of night flowers blooming under the moon.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IM+Fell+English:ital@0;1&display=swap">
+<style>
+:root{
+  --bg:#0b090e;
+  --surface:#15111a;
+  --line:#2b2331;
+  --bone:#dcd2c4;
+  --ash:#8f848c;
+  --blood:#a3203a;
+  --blood-dim:#33101a;
+  --gold:#b8975e;
+  --f-body:"IM Fell English",Georgia,"Times New Roman",serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  color-scheme:dark;
+}
+html{box-sizing:border-box;height:100%;background:var(--bg);padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*,*::before,*::after{box-sizing:inherit}
+[hidden]{display:none!important}
+body{height:100%;margin:0;background:var(--bg);color:var(--bone);font-family:var(--f-body);overflow:hidden;-webkit-font-smoothing:antialiased}
+.app{
+  height:100%;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;
+  padding-block:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+.stage{position:relative;min-height:0;border:1px solid var(--line);background:var(--bg);overflow:hidden;cursor:crosshair;touch-action:none}
+canvas{position:absolute;inset:0;display:block}
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-family:var(--f-mono);font-size:12px;letter-spacing:.04em;color:var(--bone);background:var(--surface);border:1px solid var(--line);padding:6px 12px;white-space:nowrap;pointer-events:none}
+.controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
+.group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.label{font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ash);margin-right:6px}
+button{
+  font-family:var(--f-body);font-size:15px;line-height:1;color:var(--bone);
+  background:var(--surface);border:1px solid var(--line);border-radius:2px;
+  padding:7px 11px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+}
+button:hover{border-color:var(--ash)}
+button:focus-visible{outline:1px solid var(--gold);outline-offset:2px}
+button[aria-pressed="true"]{background:var(--blood-dim);border-color:var(--blood)}
+.sw{width:8px;height:8px;border-radius:50%;background:var(--c);display:inline-block}
+@media (max-width:560px){
+  button{font-size:14px;padding:6px 9px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="stage" id="stage">
+    <canvas id="garden" role="img" aria-label="Animated ASCII garden for my wife"></canvas>
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+  <footer class="controls">
+    <div class="group" id="chips" aria-label="Flower to plant">
+      <span class="label">Plant</span>
+      <button id="sp-random" data-sp="random" aria-pressed="true" title="Key 1"><span class="sw" style="--c:conic-gradient(#a3203a 0 25%,#6b46a0 0 50%,#ddd3c4 0 75%,#b45ab4 0)"></span>Any</button>
+      <button id="sp-rose" data-sp="rose" aria-pressed="false" title="Key 2"><span class="sw" style="--c:#a3203a"></span>Rose</button>
+      <button id="sp-nightshade" data-sp="nightshade" aria-pressed="false" title="Key 3"><span class="sw" style="--c:#6b46a0"></span>Nightshade</button>
+      <button id="sp-lily" data-sp="lily" aria-pressed="false" title="Key 4"><span class="sw" style="--c:#ddd3c4"></span>Lily</button>
+      <button id="sp-thistle" data-sp="thistle" aria-pressed="false" title="Key 5"><span class="sw" style="--c:#b45ab4"></span>Thistle</button>
+    </div>
+    <div class="group">
+      <button id="gust" title="Space">Gust</button>
+      <button id="scatter" title="Key S">Scatter all</button>
+      <button id="auto" aria-pressed="false" title="Key A">Self-seeding</button>
+      <button id="copy" title="Key C">Copy frame</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+(() => {
+const stage = document.getElementById('stage');
+const cv = document.getElementById('garden');
+const ctx = cv.getContext('2d', { alpha: false });
+const toastEl = document.getElementById('toast');
+const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------- palette (rgb triples, canvas only) ---------- */
+const BG = [11, 9, 14], ASH = [74, 66, 72], MOON = [228, 218, 202], FOG = [124, 100, 156],
+      GOLD = [212, 172, 96], STEM_LO = [38, 54, 42], STEM_HI = [86, 110, 76], LEAF = [64, 98, 62],
+      STONE = [72, 66, 78], STONE_TXT = [150, 138, 150], STAR = [176, 166, 196], BAT = [104, 86, 122];
+
+const SPECIES = {
+  rose:       { k: 5,  base: .62, sharp: .9,  R: [4.2, 6],   h: [.38, .7],  chars: '@%#*+=-:', spiral: true,
+                core: .14, coreCh: '@',  coreCol: [44, 4, 12],    petal: [[56, 6, 18], [140, 20, 40], [212, 58, 78]],    tilt: .82 },
+  nightshade: { k: 5,  base: .38, sharp: .55, R: [3.4, 4.8], h: [.3, .6],   chars: '#%*o+:',
+                core: .22, coreCh: ':*', coreCol: [218, 178, 84], petal: [[40, 18, 66], [92, 48, 146], [168, 120, 218]], tilt: .8 },
+  lily:       { k: 6,  base: .1,  sharp: 2.4, R: [5, 7.2],   h: [.42, .78], chars: '%*+;:.',
+                core: .14, coreCh: ':*', coreCol: [180, 142, 74], petal: [[98, 90, 92], [190, 180, 170], [242, 234, 220]], tilt: .85 },
+  thistle:    { k: 16, base: .32, sharp: 5,   R: [3.4, 4.6], h: [.3, .55],  radial: true,
+                core: .16, coreCh: '#',  coreCol: [70, 92, 64],   petal: [[66, 26, 86], [146, 60, 154], [222, 134, 220]], tilt: .9 },
+};
+const KEYS = Object.keys(SPECIES);
+
+/* ---------- helpers ---------- */
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const clamp01 = v => clamp(v, 0, 1);
+const rand = (a, b) => a + Math.random() * (b - a);
+const frac = v => v - Math.floor(v);
+const ease = v => 1 - Math.pow(1 - v, 3);
+const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+const rgbs = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+const pal = (s, t) => (t = clamp01(t), t < .5 ? mixc(s[0], s[1], t * 2) : mixc(s[1], s[2], (t - .5) * 2));
+function hash(x, y) {
+  let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+
+/* ---------- grid ---------- */
+let W = 1, H = 1, dpr = 1, fs = 14, cw = 8, chH = 16, cols = 0, rows = 0, ground = 0, ox = 0, oy = 0;
+let gch = [], gcl = [];
+function put(c, r, ch, col) {
+  c = Math.round(c); r = Math.round(r);
+  if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+  const i = r * cols + c; gch[i] = ch; gcl[i] = col;
+}
+function putE(c, r, ch, col) {
+  c = Math.round(c); r = Math.round(r);
+  if (c < 0 || c >= cols || r < 0 || r >= rows) return;
+  const i = r * cols + c; if (gch[i]) return; gch[i] = ch; gcl[i] = col;
+}
+
+/* ---------- state ---------- */
+let flowers = [], petals = [], bats = [], flies = [], stars = [], tufts = [];
+let wind = 0, gust = 0, fogX = 0, t = 0, last = performance.now();
+let meteors = [], nextMeteor = 3;
+let nextAuto = 2, nextBat = 5, auto = false, chosen = 'random', uid = 0;
+const pointer = { x: -999, y: -999, in: false, lastX: null };
+
+const sizeScale = () => clamp(rows / 46, .55, 1.25);
+const maxFlowers = () => clamp(Math.floor(cols / 10), 4, 16);
+
+function resize() {
+  const r = stage.getBoundingClientRect();
+  W = Math.max(1, r.width); H = Math.max(1, r.height);
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  fs = W < 560 ? 11 : W < 900 ? 13 : 14;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = `${fs}px "IBM Plex Mono", ui-monospace, Consolas, monospace`;
+  ctx.textBaseline = 'top';
+  cw = ctx.measureText('M').width; chH = Math.round(fs * 1.18);
+  cols = Math.max(10, Math.floor(W / cw)); rows = Math.max(12, Math.floor(H / chH));
+  ox = (W - cols * cw) / 2; oy = (H - rows * chH) / 2;
+  ground = rows - 3;
+  gch = new Array(cols * rows).fill(''); gcl = new Array(cols * rows).fill('');
+
+  stars = [];
+  const ns = Math.round(cols * rows * .0045);
+  for (let i = 0; i < ns; i++) stars.push({ c: Math.random() * cols | 0, r: Math.random() * rows * .55 | 0,
+    ph: Math.random() * 6.28, sp: .4 + Math.random() * 1.4, ch: Math.random() < .14 ? '+' : '.' });
+  tufts = [];
+  for (let c = 0; c < cols; c++) if (hash(c, 7) < .22) tufts.push({ c, ch: '"v\'|'[(hash(c, 9) * 4) | 0] });
+  if (!flies.length) for (let i = 0; i < (RM ? 4 : 11); i++)
+    flies.push({ x: rand(2, cols - 2), y: rand(rows * .4, ground - 3), vx: 0, vy: 0, ph: Math.random() * 6.28, f: rand(.6, 1.5) });
+  for (const fl of flies) { fl.x = clamp(fl.x, 1, cols - 2); fl.y = clamp(fl.y, rows * .25, ground - 2); }
+  petals = [];
+}
+
+/* ---------- flowers ---------- */
+function makeFlower(xf, key, o = {}) {
+  const S = SPECIES[key], depth = o.depth ?? 1, side = Math.random() < .5 ? -1 : 1;
+  return {
+    id: uid++, S, key, xf, depth,
+    hf: rand(S.h[0], S.h[1]) * (.72 + .28 * depth),
+    Rb: rand(S.R[0], S.R[1]) * (.7 + .3 * depth),
+    growT: rand(3, 4.5), bloomT: rand(2.5, 4), life: rand(28, 50), witherT: rand(5, 7),
+    age: o.age ?? 0, ph: Math.random() * 6.28, spin: Math.random() * 6.28, dir: Math.random() < .5 ? -1 : 1,
+    lean: rand(-1.2, 1.2), push: 0, shed: 0, cx: 0, cy: 0, R: 0, P: null,
+    leaves: [{ at: rand(.2, .34), s: side }, { at: rand(.45, .6), s: -side }],
+  };
+}
+function phase(f) {
+  const a = f.age;
+  return {
+    g: ease(clamp01(a / f.growT)),
+    b: ease(clamp01((a - f.growT * .8) / f.bloomT)),
+    w: clamp01((a - f.life) / f.witherT),
+    collapse: clamp01((a - f.life - f.witherT) / 2.5),
+  };
+}
+const living = () => flowers.filter(f => f.age < f.life);
+function plant(xf, key, o) {
+  if (key === 'random') key = KEYS[(Math.random() * KEYS.length) | 0];
+  const f = makeFlower(xf, key, o);
+  flowers.push(f);
+  flowers.sort((a, b) => a.depth - b.depth);
+  const alive = living();
+  if (alive.length > maxFlowers()) {
+    const oldest = alive.filter(x => x !== f).sort((a, b) => (b.age - b.growT) - (a.age - a.growT))[0];
+    if (oldest) oldest.life = oldest.age;
+  }
+  return f;
+}
+function openSpot() {
+  let best = .5, bestD = -1;
+  for (let i = 0; i < 8; i++) {
+    const x = rand(.04, .96);
+    let d = 9;
+    for (const f of flowers) if (f.age < f.life) d = Math.min(d, Math.abs(f.xf - x));
+    if (d > bestD) { bestD = d; best = x; }
+  }
+  return best;
+}
+function burst(f, n) {
+  if (!f.R) return;
+  const asp = cw / chH;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.283, rr = Math.random() * f.R;
+    petals.push({
+      x: f.cx + Math.cos(a) * rr / asp, y: f.cy + Math.sin(a) * rr * f.S.tilt,
+      vx: Math.cos(a) * rand(2, 7) + wind * 2, vy: Math.sin(a) * rand(1, 4) - rand(0, 2.5),
+      ch: ",'`*~"[(Math.random() * 5) | 0], col: pal(f.S.petal, rand(.4, 1)),
+      life: rand(4, 8), ph: Math.random() * 6.28,
+    });
+  }
+}
+function scatter(f) { burst(f, 34); f.life = Math.min(f.life, f.age); f.witherT = 3; }
+
+/* ---------- scenery ---------- */
+const TOMBSTONE = ["  .-~~~~-.  ", " /        \\ ", "|   ALEX   |", "|    &     |", "|   TERI   |", "|          |", "|__________|"];
+function drawSprite(lines, c0, bottomRow, colFor) {
+  const top = bottomRow - lines.length + 1;
+  // spaces inside the outline are filled too, so fog and stars don't show through the stone
+  lines.forEach((ln, r) => {
+    const a = ln.search(/\S/), b = ln.trimEnd().length;
+    for (let i = a; i < b; i++) put(c0 + i, top + r, ln[i], colFor(ln[i]));
+  });
+}
+function drawMoon() {
+  const asp = cw / chH;
+  const mx = cols - Math.max(7, cols * .15), my = Math.max(4, rows * .17), Rm = clamp(rows * .1, 2.5, 6);
+  const rx = Math.ceil(Rm * 1.45 / asp), ry = Math.ceil(Rm * 1.45);
+  const ramp = ' .:-=+*#%@';
+  for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+    const px = dx * asp / Rm, py = dy / Rm, d2 = px * px + py * py;
+    if (d2 > 1) {
+      const d = Math.sqrt(d2);
+      if (d > 1.25 && d < 1.42 && hash(dx + 40, dy + 40) < .3)
+        put(mx + dx, my + dy, '.', rgbs(mixc(BG, FOG, .35 + .2 * Math.sin(t * .7 + dx))));
+      continue;
+    }
+    const nz = Math.sqrt(1 - d2);
+    const dot = -.55 * px - .35 * py + .76 * nz;
+    const crater = vnoise(px * 3 + 5, py * 3 + 2) > .63 ? .24 : 0;
+    const lum = clamp01(dot * .9 - crater + .1);
+    const ch = ramp[Math.min(9, (lum * 10) | 0)];
+    if (ch !== ' ') put(mx + dx, my + dy, ch, rgbs(mixc(BG, MOON, .16 + .62 * lum)));
+  }
+  return { x: ox + mx * cw, y: oy + my * chH, r: Rm * chH };
+}
+
+function drawFlower(f) {
+  const P = phase(f); f.P = P;
+  const S = f.S, asp = cw / chH, dim = .5 + .5 * f.depth;
+  const Hc = Math.max(5, f.hf * (ground - 3));
+  const len = Math.max(1, Math.round(Hc * P.g * (1 - P.collapse)));
+  const x0 = f.xf * cols, base = ground - 1;
+  const amp = (RM ? .25 : 1) * (.9 + Hc * .035);
+  const droop = (P.w * 2.4 + P.collapse * 3) * f.dir;
+  const xs = new Array(len + 1);
+  for (let i = 0; i <= len; i++) {
+    const u = i / Hc;
+    xs[i] = x0 + (Math.sin(t * .85 + f.ph + i * .07) * amp * .6 + wind * (.9 + .6 * f.depth) + f.lean + f.push + droop) * Math.pow(u, 1.5);
+  }
+  for (let i = 0; i < len; i++) {
+    const a = Math.round(xs[i]), d = Math.round(xs[i + 1]) - a;
+    let c = mixc(STEM_LO, STEM_HI, i / Hc);
+    c = mixc(c, ASH, P.w * .7);
+    put(a, base - i, d > 0 ? '/' : d < 0 ? '\\' : '|', rgbs(mixc(BG, c, dim)));
+  }
+  for (const L of f.leaves) {
+    const idx = Math.round(L.at * Hc);
+    if (idx >= len - 1) continue;
+    const xr = Math.round(xs[idx]), row = base - idx;
+    const lc = rgbs(mixc(BG, mixc(LEAF, ASH, P.w * .8), dim));
+    const full = len - idx > 3;
+    if (L.s > 0) { put(xr + 1, row, '_', lc); if (full) put(xr + 2, row, P.w > .5 ? '.' : '/', lc); }
+    else { put(xr - 1, row, '_', lc); if (full) put(xr - 2, row, P.w > .5 ? '.' : '\\', lc); }
+  }
+
+  const cx = xs[len], cy = base - len;
+  f.cx = cx; f.cy = cy;
+  if (P.b <= .02) {
+    f.R = 0;
+    if (len > 2) put(cx, cy, P.g > .9 ? 'o' : ',', rgbs(mixc(BG, P.g > .9 ? S.petal[1] : STEM_HI, dim)));
+    return;
+  }
+  const R = f.Rb * sizeScale() * P.b * (1 - .45 * P.w) * (1 - P.collapse);
+  f.R = R;
+  if (R < 1) { put(cx, cy, 'o', rgbs(mixc(BG, S.petal[1], dim))); return; }
+  const tilt = S.tilt, spin = f.spin + (RM ? 0 : t * .04 * f.dir);
+  const rx = Math.ceil(R / asp) + 1, ry = Math.ceil(R * tilt) + 1;
+  for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
+    const px = dx * asp, py = dy / tilt, r = Math.hypot(px, py);
+    if (r > R) continue;
+    if (S.radial && py > R * .25) continue;
+    const th = Math.atan2(py, px);
+    const edge = R * (S.base + (1 - S.base) * Math.pow(Math.abs(Math.cos(S.k * (th + spin) / 2)), S.sharp));
+    const tt = r / R;
+    if (r > edge && tt > S.core) continue;
+    if (P.w > 0 && hash(dx * 7 + f.id, dy * 13 + f.id) < P.w * .85) continue;
+    let ch, col;
+    if (tt < S.core) {
+      ch = S.coreCh.length > 1 ? S.coreCh[(hash(dx + 3, dy + f.id) * S.coreCh.length) | 0] : S.coreCh;
+      col = S.coreCol;
+    } else if (S.radial) {
+      const a = ((th % Math.PI) + Math.PI) % Math.PI;
+      ch = '-\\|/'[Math.round(a / (Math.PI / 4)) % 4];
+      col = pal(S.petal, tt);
+    } else if (S.spiral) {
+      const s = frac(tt * 2.6 - th / (Math.PI * 2) + spin * .2);
+      ch = S.chars[(s * S.chars.length) | 0];
+      col = mixc(pal(S.petal, .2 + .8 * tt), BG, .45 * s);
+    } else {
+      const e = r / edge;
+      ch = S.chars[Math.min(S.chars.length - 1, (e * S.chars.length) | 0)];
+      col = pal(S.petal, .25 + .75 * e);
+    }
+    col = mixc(col, ASH, P.w * .75);
+    put(cx + dx, cy + dy, ch, rgbs(mixc(BG, col, dim * (1 - P.collapse * .6))));
+  }
+  if (S.radial) {
+    const gc = rgbs(mixc(BG, mixc(S.coreCol, ASH, P.w), dim));
+    put(cx - 1, cy + 1, '\\', gc); put(cx, cy + 1, '#', gc); put(cx + 1, cy + 1, '/', gc);
+  }
+}
+
+/* ---------- update ---------- */
+function update(dt) {
+  const breeze = (RM ? .3 : 1) * (Math.sin(t * .13) * .6 + Math.sin(t * .37 + 1) * .3);
+  gust *= Math.exp(-dt * 1.1);
+  wind += (breeze + gust - wind) * Math.min(1, dt * 2);
+  fogX += (.35 + wind * .25) * dt * (RM ? .2 : 1);
+
+  const pcx = (pointer.x - ox) / cw, pcy = (pointer.y - oy) / chH;
+  for (const f of flowers) {
+    f.age += dt;
+    let target = 0;
+    if (pointer.in) {
+      const topX = f.cx || f.xf * cols, topY = f.cy || ground - f.hf * ground;
+      const dx = pcx - topX, d = Math.hypot(dx * .55, (pcy - topY) * .4);
+      if (d < 9) target = -Math.sign(dx || 1) * (1 - d / 9) * 3.5;
+    }
+    f.push += (target - f.push) * Math.min(1, dt * 4);
+    const P = f.P;
+    if (P && P.w > 0 && P.w < 1 && f.R > 1) {
+      f.shed += dt * 7;
+      while (f.shed > 1) { burst(f, 1); f.shed--; }
+    }
+  }
+  flowers = flowers.filter(f => f.age < f.life + f.witherT + 2.5);
+
+  for (const p of petals) {
+    if (p.y < ground) {
+      p.vy = Math.min(4, p.vy + 3.5 * dt);
+      p.vx += (wind * 3 - p.vx) * dt * .8 + Math.sin(t * 3 + p.ph) * dt * 2;
+      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.y >= ground) { p.y = ground - .01; p.ch = '.'; }
+    } else p.life -= dt;
+    p.life -= dt * .5;
+  }
+  petals = petals.filter(p => p.life > 0 && p.x > -2 && p.x < cols + 2);
+  if (petals.length > 900) petals.splice(0, petals.length - 900);
+
+  for (const fl of flies) {
+    fl.vx += (vnoise(fl.ph * 10 + t * .3, 1) - .5) * dt * 7;
+    fl.vy += (vnoise(fl.ph * 10 + t * .3, 9) - .5) * dt * 5;
+    if (pointer.in) {
+      const dx = pcx - fl.x, dy = pcy - fl.y, d = Math.hypot(dx, dy) + 1;
+      if (d < 22) { fl.vx += dx / d * dt * 4; fl.vy += dy / d * dt * 3; }
+    }
+    fl.vx *= 1 - dt * .8; fl.vy *= 1 - dt * .8;
+    fl.x += fl.vx * dt; fl.y += fl.vy * dt;
+    if (fl.x < 1 || fl.x > cols - 2) { fl.vx *= -1; fl.x = clamp(fl.x, 1, cols - 2); }
+    if (fl.y < rows * .25 || fl.y > ground - 2) { fl.vy *= -1; fl.y = clamp(fl.y, rows * .25, ground - 2); }
+  }
+
+  if (!RM && cols > 40) {
+    nextBat -= dt;
+    if (nextBat <= 0) {
+      const d = Math.random() < .5 ? 1 : -1;
+      bats.push({ x: d > 0 ? -4 : cols + 4, y: rand(rows * .08, rows * .32), vx: d * rand(7, 12), ph: Math.random() * 6.28 });
+      nextBat = rand(7, 16);
+    }
+  }
+  for (const b of bats) { b.x += b.vx * dt; b.y += Math.sin(t * 3 + b.ph) * dt * 1.5; }
+  bats = bats.filter(b => b.x > -6 && b.x < cols + 6);
+
+  nextMeteor -= dt;
+  if (nextMeteor <= 0) {
+    const d = Math.random() < .5 ? 1 : -1;
+    meteors.push({ x: rand(cols * .1, cols * .9), y: rand(1, rows * .22), vx: d * rand(30, 48), vy: rand(5, 10), age: 0, life: rand(.7, 1.1) });
+    nextMeteor = RM ? rand(25, 50) : rand(6, 18);
+  }
+  for (const m of meteors) { m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt; }
+  meteors = meteors.filter(m => m.age < m.life + .4);
+
+  if (auto) {
+    nextAuto -= dt;
+    if (nextAuto <= 0) {
+      if (living().length < maxFlowers()) plant(openSpot(), 'random', { depth: rand(.55, 1) });
+      nextAuto = rand(2.5, 5);
+    }
+  }
+}
+
+/* ---------- compose + render ---------- */
+let moonGlow = { x: 0, y: 0, r: 1 };
+function compose() {
+  gch.fill(''); gcl.fill('');
+  for (const s of stars) {
+    const lum = .3 + .7 * Math.pow((Math.sin(t * s.sp + s.ph) + 1) / 2, 2);
+    put(s.c, s.r, s.ch, rgbs(mixc(BG, STAR, .12 + .42 * lum)));
+  }
+  for (const m of meteors) {
+    // head fades in then out; trail lingers a little after the head is gone
+    const fade = clamp01(m.age / .12) * clamp01((m.life + .4 - m.age) / .5);
+    const head = m.age < m.life;
+    const ang = Math.atan2(m.vy * chH, Math.abs(m.vx) * cw);
+    const body = ang < .35 ? '-' : m.vx > 0 ? '\\' : '/';
+    const L = 18;
+    for (let k = head ? 0 : 4; k <= L; k++) {
+      const s = k * .026, ch = k === 0 ? '*' : k === 1 ? '+' : k > L - 3 ? '.' : body;
+      put(m.x - m.vx * s, m.y - m.vy * s, ch, rgbs(mixc(BG, MOON, fade * (1 - k / (L + 1)))));
+    }
+  }
+  moonGlow = drawMoon();
+  const sc = rgbs(STONE), tc = rgbs(STONE_TXT);
+  drawSprite(TOMBSTONE, clamp(Math.round(cols * .7), 1, Math.max(1, cols - 13)), ground - 1, ch => /[A-Z&]/.test(ch) ? tc : sc);
+  for (const b of bats) {
+    const s = ((t * 7 + b.ph) | 0) % 2 ? '^v^' : '-v-', c = rgbs(BAT);
+    for (let i = 0; i < 3; i++) put(b.x - 1 + i, b.y, s[i], c);
+  }
+  for (const tf of tufts) {
+    const w = wind + Math.sin(t * 1.3 + tf.c * .3) * .6;
+    put(tf.c, ground - 1, w > 1.2 ? '/' : w < -1.2 ? '\\' : tf.ch, rgbs(mixc(BG, [64, 88, 60], .7)));
+  }
+  for (const f of flowers) drawFlower(f);
+  for (const fl of flies) {
+    const g = Math.pow((Math.sin(t * fl.f * 2 + fl.ph) + 1) / 2, 3);
+    if (g < .05) continue;
+    put(fl.x, fl.y, g > .6 ? '*' : g > .25 ? '+' : '.', rgbs(mixc(BG, GOLD, .25 + .75 * g)));
+  }
+  for (const p of petals) {
+    const ch = p.y >= ground - .5 ? '.' : (Math.sin(t * 6 + p.ph) > 0 ? p.ch : "'");
+    put(p.x, p.y, ch, rgbs(mixc(BG, p.col, Math.min(1, p.life / 2))));
+  }
+  for (let r = ground - 7; r < ground; r++) {
+    const k = (r - (ground - 8)) / 8;
+    for (let c = 0; c < cols; c++) {
+      const v = vnoise(c * .09 + fogX, r * .6 + t * .05) * k;
+      if (v > .38) putE(c, r, v > .6 ? '~' : v > .48 ? '-' : '.', rgbs(mixc(BG, FOG, .14 + .38 * v)));
+    }
+  }
+  const g0 = rgbs(mixc(BG, [72, 82, 62], .75)), g1 = rgbs([58, 48, 54]), g2 = rgbs([40, 33, 40]);
+  for (let c = 0; c < cols; c++) {
+    const h = hash(c, 3);
+    put(c, ground, h < .55 ? '_' : h < .7 ? '.' : h < .82 ? ',' : h < .9 ? '`' : '_', g0);
+    const h2 = hash(c, 5);
+    if (h2 < .25) put(c, ground + 1, h2 < .07 ? ':' : '.', g1);
+    if (hash(c, 11) < .12) put(c, ground + 2, '.', g2);
+  }
+}
+
+function render() {
+  ctx.fillStyle = rgbs(BG); ctx.fillRect(0, 0, W, H);
+  const mg = ctx.createRadialGradient(moonGlow.x, moonGlow.y, 0, moonGlow.x, moonGlow.y, moonGlow.r * 3.2);
+  mg.addColorStop(0, 'rgba(150,120,180,0.13)'); mg.addColorStop(1, 'rgba(150,120,180,0)');
+  ctx.fillStyle = mg; ctx.fillRect(0, 0, W, H);
+  let lastCol = '';
+  for (let r = 0; r < rows; r++) {
+    const y = oy + r * chH;
+    for (let c = 0; c < cols; c++) {
+      const i = r * cols + c, ch = gch[i];
+      if (!ch) continue;
+      const col = gcl[i];
+      if (col !== lastCol) { ctx.fillStyle = col; lastCol = col; }
+      ctx.fillText(ch, ox + c * cw, y);
+    }
+  }
+  const vg = ctx.createRadialGradient(W / 2, H * .45, Math.min(W, H) * .35, W / 2, H * .45, Math.max(W, H) * .8);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+}
+
+
+function frame(now) {
+  const dt = Math.min(.05, (now - last) / 1000); last = now; t += dt;
+  update(dt); compose(); render();
+  requestAnimationFrame(frame);
+}
+
+/* ---------- input ---------- */
+function toast(msg) {
+  toastEl.textContent = msg; toastEl.hidden = false;
+  clearTimeout(toast.h); toast.h = setTimeout(() => { toastEl.hidden = true; }, 1800);
+}
+function local(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+stage.addEventListener('pointermove', e => {
+  const p = local(e);
+  if (pointer.lastX !== null) gust = clamp(gust + (p.x - pointer.lastX) * (e.buttons ? .02 : .01), -6, 6);
+  pointer.lastX = p.x; pointer.x = p.x; pointer.y = p.y; pointer.in = true;
+});
+stage.addEventListener('pointerleave', () => { pointer.in = false; pointer.lastX = null; });
+stage.addEventListener('pointerdown', e => {
+  const p = local(e); pointer.x = p.x; pointer.y = p.y; pointer.lastX = p.x; pointer.in = e.pointerType === 'mouse';
+  const cx = (p.x - ox) / cw, cy = (p.y - oy) / chH, asp = cw / chH;
+  for (let i = flowers.length - 1; i >= 0; i--) {
+    const f = flowers[i];
+    if (f.R > 1 && f.P && f.P.w === 0 && Math.hypot((cx - f.cx) * asp, (cy - f.cy) / f.S.tilt) < f.R * 1.05) { scatter(f); return; }
+  }
+  plant(clamp(cx / cols, .02, .98), chosen, { depth: 1 });
+});
+
+const chipBtns = [...document.querySelectorAll('#chips button')];
+function choose(sp) { chosen = sp; chipBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sp === sp))); }
+chipBtns.forEach(b => b.addEventListener('click', () => choose(b.dataset.sp)));
+
+function doGust() {
+  gust = clamp(gust + (Math.random() < .5 ? -1 : 1) * 5, -7, 7);
+  for (const f of flowers) if (f.P && f.P.b > .5 && f.P.w === 0) burst(f, 4);
+}
+function scatterAll() { for (const f of flowers) if (f.age < f.life) { if (f.R > 1) scatter(f); else f.life = f.age; } }
+const autoBtn = document.getElementById('auto');
+function toggleAuto() { auto = !auto; autoBtn.setAttribute('aria-pressed', String(auto)); toast(auto ? 'Self-seeding on' : 'Self-seeding off'); }
+
+function frameText() {
+  const out = [];
+  for (let r = 0; r < rows; r++) {
+    let s = '';
+    for (let c = 0; c < cols; c++) s += gch[r * cols + c] || ' ';
+    out.push(s.replace(/\s+$/, ''));
+  }
+  while (out.length && !out[0]) out.shift();
+  return out.join('\n');
+}
+function copyFrame() {
+  const txt = frameText();
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = txt; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+    toast(ok ? 'Frame copied as plain text' : 'This browser blocked copying');
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(txt).then(() => toast('Frame copied as plain text'), fallback);
+  else fallback();
+}
+
+document.getElementById('gust').addEventListener('click', doGust);
+document.getElementById('scatter').addEventListener('click', scatterAll);
+autoBtn.addEventListener('click', toggleAuto);
+document.getElementById('copy').addEventListener('click', copyFrame);
+addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k >= '1' && k <= '5') choose(['random', ...KEYS][+k - 1]);
+  else if (k === ' ') { e.preventDefault(); doGust(); }
+  else if (k === 's') scatterAll();
+  else if (k === 'a') toggleAuto();
+  else if (k === 'c') copyFrame();
+});
+
+new ResizeObserver(resize).observe(stage);
+resize();
+if (document.fonts) document.fonts.load(`14px "IBM Plex Mono"`).then(resize, () => {});
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
