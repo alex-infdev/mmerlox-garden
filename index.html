@@ -34,8 +34,14 @@ body{height:100%;margin:0;background:var(--bg);color:var(--bone);font-family:var
 }
 .stage{position:relative;min-height:0;border:1px solid var(--line);background:var(--bg);overflow:hidden;cursor:crosshair;touch-action:none}
 canvas{position:absolute;inset:0;display:block}
-.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-family:var(--f-mono);font-size:12px;letter-spacing:.04em;color:var(--bone);background:var(--surface);border:1px solid var(--line);padding:6px 12px;white-space:nowrap;pointer-events:none}
-.controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 20px}
+.toast{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);font-family:var(--f-mono);font-size:12px;letter-spacing:.04em;color:var(--bone);background:var(--surface);border:1px solid var(--line);padding:6px 12px;white-space:nowrap;pointer-events:none;z-index:4}
+
+/* controls: garden and sky sets share one grid cell and cross-fade */
+.controls{display:grid}
+.ctl{grid-area:1/1;display:flex;flex-wrap:wrap;align-items:center;gap:10px 20px;transition:opacity .5s ease,transform .5s ease}
+.ctl-garden{justify-content:space-between}
+.ctl-sky{justify-content:center;align-self:start}
+.ctl[inert]{opacity:0;transform:translateY(6px);pointer-events:none}
 .group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .label{font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ash);margin-right:6px}
 button{
@@ -47,6 +53,57 @@ button:hover{border-color:var(--ash)}
 button:focus-visible{outline:1px solid var(--gold);outline-offset:2px}
 button[aria-pressed="true"]{background:var(--blood-dim);border-color:var(--blood)}
 .sw{width:8px;height:8px;border-radius:50%;background:var(--c);display:inline-block}
+
+/* sky overlay: invisible hit targets on memory stars, the memory card, the way back down */
+.mem{position:absolute;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;z-index:2}
+.mem:hover{border:0}
+.mem:focus-visible{outline:1px solid var(--gold);outline-offset:0}
+/* the passcode box sits invisibly over the ASCII lock: tapping the lock opens the keypad, the canvas draws the slots */
+.code{position:absolute;z-index:2;opacity:0;margin:0;padding:0;border:0;background:transparent;color:transparent;caret-color:transparent;font-size:16px;cursor:pointer}
+.card{
+  position:absolute;z-index:3;width:min(270px,calc(100% - 24px));
+  background:var(--surface);border:1px solid var(--line);padding:12px 14px 14px;
+  box-shadow:0 10px 30px rgba(0,0,0,.5);
+}
+.card-date{margin:0 0 4px;font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);font-variant-numeric:tabular-nums}
+.card-title{margin:0 0 6px;font-weight:400;font-size:19px;line-height:1.2;color:var(--bone);text-wrap:balance}
+.card-note{margin:0;font-size:15px;line-height:1.45;color:var(--ash);white-space:pre-line}
+.card{max-height:calc(100% - 16px);overflow:auto}
+.starform{width:min(300px,calc(100% - 16px));max-height:calc(100% - 16px);overflow:auto}
+.fld{display:grid;gap:4px;margin:0 0 10px}
+.fld>span{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ash)}
+.mem.group{border-radius:2px}
+.nav{
+  position:absolute;top:50%;z-index:2;transform:translateY(-50%);background:transparent;border:0;
+  padding:14px 12px;font-family:var(--f-mono);font-size:20px;color:var(--ash);
+}
+.nav:hover{border:0;color:var(--bone)}
+.nav.prev{left:4px}
+.nav.next{right:4px}
+.fld select{
+  width:100%;font-family:var(--f-body);font-size:16px;color:var(--bone);
+  background:var(--bg);border:1px solid var(--line);border-radius:2px;padding:6px 8px;
+}
+.fld input,.fld textarea{
+  width:100%;font-family:var(--f-body);font-size:16px;line-height:1.35;color:var(--bone);
+  background:var(--bg);border:1px solid var(--line);border-radius:2px;padding:6px 8px;resize:vertical;
+}
+.fld input:focus-visible,.fld textarea:focus-visible{outline:1px solid var(--gold);outline-offset:0}
+.seg{display:flex;gap:6px}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+button.primary{background:var(--blood-dim);border-color:var(--blood)}
+button:disabled{opacity:.5;cursor:default}
+.down{
+  position:absolute;left:50%;bottom:10px;z-index:2;transform:translateX(-50%);
+  background:transparent;border:0;padding:6px 14px;
+  font-family:var(--f-mono);font-size:20px;color:var(--ash);
+  transition:opacity .5s ease;
+}
+.down:hover{border:0;color:var(--bone)}
+.down span{display:inline-block;animation:bob 2.4s ease-in-out infinite}
+.down[inert]{opacity:0;pointer-events:none}
+@keyframes bob{50%{transform:translateY(4px)}}
+@media (prefers-reduced-motion:reduce){.down span{animation:none}.ctl{transition:opacity .2s}}
 @media (max-width:560px){
   button{font-size:14px;padding:6px 9px}
 }
@@ -56,28 +113,76 @@ button[aria-pressed="true"]{background:var(--blood-dim);border-color:var(--blood
 <div class="app">
   <div class="stage" id="stage">
     <canvas id="garden" role="img" aria-label="Animated ASCII garden for my wife!!!"></canvas>
+    <div id="memLayer"></div>
+    <input class="code" id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" aria-label="Passcode, 6 digits" hidden>
+    <div class="card" id="card" role="dialog" aria-labelledby="cardTitle" hidden>
+      <p class="card-date" id="cardDate"></p>
+      <h2 class="card-title" id="cardTitle"></h2>
+      <p class="card-note" id="cardNote"></p>
+    </div>
+    <form class="card starform" id="starForm" autocomplete="off" hidden>
+      <p class="card-date">A new star</p>
+      <label class="fld"><span>Constellation</span><select id="sfGroup"></select></label>
+      <label class="fld" id="sfNewWrap" hidden><span>Name of the new constellation</span><input type="text" id="sfNew" maxlength="24"></label>
+      <label class="fld"><span>Date</span><input type="date" id="sfDate"></label>
+      <label class="fld" id="sfTitleWrap"><span>Title</span><input type="text" id="sfTitle" maxlength="60"></label>
+      <label class="fld"><span>Note</span><textarea id="sfNote" maxlength="600" rows="5"></textarea></label>
+      <div class="fld"><span>From</span>
+        <div class="seg" id="sfBy">
+          <button type="button" data-by="alex" aria-pressed="true">Alex</button>
+          <button type="button" data-by="teri" aria-pressed="false">Teri</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" id="sfCancel">Cancel</button>
+        <button type="submit" id="sfSave" class="primary">Save star</button>
+      </div>
+    </form>
+    <button class="nav prev" id="navPrev" aria-label="Previous constellation" hidden><span>&lt;</span></button>
+    <button class="nav next" id="navNext" aria-label="Next constellation" hidden><span>&gt;</span></button>
+    <button class="down" id="down" aria-label="Back to the garden" inert><span>v</span></button>
     <div class="toast" id="toast" hidden></div>
   </div>
 
   <footer class="controls">
-    <div class="group" id="chips" aria-label="Flower to plant">
-      <span class="label">Plant</span>
-      <button id="sp-random" data-sp="random" aria-pressed="true" title="Key 1"><span class="sw" style="--c:conic-gradient(#a3203a 0 25%,#6b46a0 0 50%,#ddd3c4 0 75%,#b45ab4 0)"></span>Any</button>
-      <button id="sp-rose" data-sp="rose" aria-pressed="false" title="Key 2"><span class="sw" style="--c:#a3203a"></span>Rose</button>
-      <button id="sp-nightshade" data-sp="nightshade" aria-pressed="false" title="Key 3"><span class="sw" style="--c:#6b46a0"></span>Nightshade</button>
-      <button id="sp-lily" data-sp="lily" aria-pressed="false" title="Key 4"><span class="sw" style="--c:#ddd3c4"></span>Lily</button>
-      <button id="sp-thistle" data-sp="thistle" aria-pressed="false" title="Key 5"><span class="sw" style="--c:#b45ab4"></span>Thistle</button>
+    <div class="ctl ctl-garden" id="ctlGarden">
+      <div class="group" id="chips" aria-label="Flower to plant">
+        <span class="label">Plant</span>
+        <button id="sp-random" data-sp="random" aria-pressed="true" title="Key 1"><span class="sw" style="--c:conic-gradient(#a3203a 0 25%,#6b46a0 0 50%,#ddd3c4 0 75%,#b45ab4 0)"></span>Any</button>
+        <button id="sp-rose" data-sp="rose" aria-pressed="false" title="Key 2"><span class="sw" style="--c:#a3203a"></span>Rose</button>
+        <button id="sp-nightshade" data-sp="nightshade" aria-pressed="false" title="Key 3"><span class="sw" style="--c:#6b46a0"></span>Nightshade</button>
+        <button id="sp-lily" data-sp="lily" aria-pressed="false" title="Key 4"><span class="sw" style="--c:#ddd3c4"></span>Lily</button>
+        <button id="sp-thistle" data-sp="thistle" aria-pressed="false" title="Key 5"><span class="sw" style="--c:#b45ab4"></span>Thistle</button>
+      </div>
+      <div class="group">
+        <button id="gust" title="Space">Gust</button>
+        <button id="scatter" title="Key S">Scatter all</button>
+        <button id="auto" aria-pressed="false" title="Key A">Self-seeding</button>
+        <button id="copy" title="Key C">Copy frame</button>
+      </div>
     </div>
-    <div class="group">
-      <button id="gust" title="Space">Gust</button>
-      <button id="scatter" title="Key S">Scatter all</button>
-      <button id="auto" aria-pressed="false" title="Key A">Self-seeding</button>
-      <button id="copy" title="Key C">Copy frame</button>
+    <div class="ctl ctl-sky" id="ctlSky" inert>
+      <button id="addStar" aria-pressed="false" hidden>Add a star</button>
     </div>
   </footer>
 </div>
 
 <script>
+/* ---------- shared stars ----------
+   From your Supabase project (Project Settings -> API). The anon key is meant to be public;
+   the table's row-level security (see supabase/stars.sql) limits what visitors can do, and every
+   row is encrypted with the passcode, so without it there is nothing to read.
+   Left empty, "Add a star" is not offered. */
+const SUPABASE_URL = 'https://eccpthuimtmlpbhwqiud.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjY3B0aHVpbXRtbHBiaHdxaXVkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0NDI1MzgsImV4cCI6MjEwOTAxODUzOH0.FB7l6c9ANpFfDVEXxIaZuepf1cEb5T1mvj0vXJMIJNo';
+
+/* ---------- memories ----------
+   The constellation is sealed: encrypted with the passcode, so only gibberish is published.
+   Edit memories.private.json (kept off GitHub), then run: node tools/seal-memories.mjs <passcode>
+   That file lists the themes (one constellation each) and the memories, each with its "group".
+   Within a constellation, stars are joined in date order and laid out automatically. */
+const SEALED = /*sealed*/{"v":1,"it":1000000,"salt":"TqLed6YhtZRFx41s/+EHIg==","iv":"4sX6+M26y5KH7uY+","ct":"JDK7zw3zYXd7pFkQlArWZc/+vitrD2/P0KJPnLLzjUbFl9LqlvjsmorXV0igkK5Ia4041k2csqZRkzBk/z0lBFuF/T4nE1w1b1Y4t1ipod+TVMM+3DkJkzLegrXGHDnvTOi7XJ6OR06jvwXMtMUc4BMyZsU9ykX6uDxOzGuqOSh6taRIlVWvjg0hWx9no4KkpnAF8GsNxFV6y3e9sZzv7HHLbNjuhIvfuoJxEBs1M+QDNee9VqSqv8jWYUozPtPNByWF2GpQt2smJJopKBSwJgjD9Na0RRARSVXO5tyBXE6R/DPloS0fhiR703FZenFyoMRrq/U+hSJBLAICBIwX6hxUl4eQv9diicKPuARvhxlIkDKWJue1CqOfayqaaJk+AYaTLHQEjofWmUK3YGaZX7t7QgKxlBth0WBORjlqS5r/rjTl/gj6dz/ct1RJjwTqoPFd6hxYOBLGOCMb1dfFlcdcB+Bfikcvw5+Z5obr9a40J0crmWUH6ALqRwz7/SGzNVsmB703AO34DFsNGT7cu5BiUCIcXG89k4RhusNg3xc6BxBkYL6LiVQ6CUKBE8AI214QG+fPMle9H+hmYUr1PkYMTjr5pJf7282HPgtiPFdMF8gWxOC6cQQNr/QdS4knntrHnlBu1XnM2nCLlJ2LU8rRmQSvptXZ99jVjB6vdr35lw1u+ay37YeghcwatI80p9OW+pXO8rxg+9TtRWoYjEcQLU1XqFX7KNU+DHR5aqG5Ld+Dt2S0SI436N1441Xp64h5trtSaDm3gaBHzJsZddUFF4fHuvH/teFgM1+UHsj6Eno390q663uqOoUioT5leY9iTIy8xsOSyOwLaE8FBFm/KO8P9iCKEFQFOww2D9XyB4FJBELqU+bdNIwiY+JjaH3I2OajRQXMinlu2t+l6oYuzUbZXD/jgPm9Zycoj2WJEorg4X/WVX1HY0bvbNxcqVKY/mzBiaGAQ9dKOHF87/pFBJj47n8WLpQiC5+4NPUP9Qjlfl6RqoQAkoSu6aoqMWAGpAcKa3vNQs4wjKvpanIb8KeOBTKGzKx68HJPAM/V06FyptXjZ+eoqJrZp7FT+COW7KE6c3ttAn6PkCunpUNTQFqRhQku1rUUg62+D6bahYItVpvdO7QuMxxGjXckY3UjDASEThJlJPr5Us0ionifxRTwuiOpTIN2zFvj1hyH/6MOMP/yd8sa0HA6A2KPkRz3QJOtUcMezowGZ5y/+XK8IvLzXkh7pRl/Bw6lT+ldtBXQLGxMGRXyHw3XQhDrrAZcp1V3XlEBvzRlu8yMbd31/+JPxvyzo0TZEyitTcy05vZv9tlf3QsSyXVJjO0HMrxZwKcIu3jbBsov53Sf14T9vavGi73/9hWlWKBVVgYylq4W7XcZgCcU7WeKTWwfiROXpwWrumgZ47UNSixtEzUGbmWVl/e+qXqmT8jLooPjoT0YjzwqH0Z7eL5uN2m4KJ69zxwPBo+8ms+Qqhukwvkx4W9ETcq9UzWnliV9EeJgKs3x6msRsJKcppnmo3I97dXmFr9OIgwc9oFpSiSMTb2IqU5tRXAuhgX+ntYROn4I2V27/JRcsTsN3m8Gehyu6/aw75ZQXpllXwx3Gm50v8vz/Q9eJJde7j5Gpi42HSSj1x0Tvhl7pvQHRfdvwk58gU0RL/qQXh97Hy0="}/*end sealed*/;
+
 (() => {
 const stage = document.getElementById('stage');
 const cv = document.getElementById('garden');
@@ -88,7 +193,8 @@ const RM = matchMedia('(prefers-reduced-motion: reduce)').matches;
 /* ---------- palette (rgb triples, canvas only) ---------- */
 const BG = [11, 9, 14], ASH = [74, 66, 72], MOON = [228, 218, 202], FOG = [124, 100, 156],
       GOLD = [212, 172, 96], STEM_LO = [38, 54, 42], STEM_HI = [86, 110, 76], LEAF = [64, 98, 62],
-      STONE = [72, 66, 78], STONE_TXT = [150, 138, 150], STAR = [176, 166, 196], BAT = [104, 86, 122];
+      STONE = [72, 66, 78], STONE_TXT = [150, 138, 150], STAR = [176, 166, 196], BAT = [104, 86, 122],
+      MEM = [240, 226, 196], TERI = [236, 152, 174];
 
 const SPECIES = {
   rose:       { k: 5,  base: .62, sharp: .9,  R: [4.2, 6],   h: [.38, .7],  chars: '@%#*+=-:', spiral: true,
@@ -108,6 +214,7 @@ const clamp01 = v => clamp(v, 0, 1);
 const rand = (a, b) => a + Math.random() * (b - a);
 const frac = v => v - Math.floor(v);
 const ease = v => 1 - Math.pow(1 - v, 3);
+const easeInOut = v => v < .5 ? 4 * v * v * v : 1 - Math.pow(-2 * v + 2, 3) / 2;
 const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const rgbs = c => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
 const pal = (s, t) => (t = clamp01(t), t < .5 ? mixc(s[0], s[1], t * 2) : mixc(s[1], s[2], (t - .5) * 2));
@@ -123,29 +230,45 @@ function vnoise(x, y) {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-/* ---------- grid ---------- */
+/* ---------- grid ----------
+   Two planes share the grid: the far plane (sky, moon, stars) and the near plane (ground, flowers, fog).
+   setPlane() picks the plane and its vertical camera shift; whole rows go into the grid, the leftover
+   fraction is applied in pixels at render time so the pan stays smooth. */
 let W = 1, H = 1, dpr = 1, fs = 14, cw = 8, chH = 16, cols = 0, rows = 0, ground = 0, ox = 0, oy = 0;
-let gch = [], gcl = [];
+let gch = [], gcl = [], gly = [];
+let yo = 0, plane = 0;
+const planeFrac = [0, 0];
+function setPlane(id, shift) { plane = id; yo = Math.floor(shift); planeFrac[id] = (shift - yo) * chH; }
 function put(c, r, ch, col) {
-  c = Math.round(c); r = Math.round(r);
+  c = Math.round(c); r = Math.round(r) + yo;
   if (c < 0 || c >= cols || r < 0 || r >= rows) return;
-  const i = r * cols + c; gch[i] = ch; gcl[i] = col;
+  const i = r * cols + c; gch[i] = ch; gcl[i] = col; gly[i] = plane;
 }
 function putE(c, r, ch, col) {
-  c = Math.round(c); r = Math.round(r);
+  c = Math.round(c); r = Math.round(r) + yo;
   if (c < 0 || c >= cols || r < 0 || r >= rows) return;
-  const i = r * cols + c; if (gch[i]) return; gch[i] = ch; gcl[i] = col;
+  const i = r * cols + c; if (gch[i]) return; gch[i] = ch; gcl[i] = col; gly[i] = plane;
 }
 
 /* ---------- state ---------- */
-let flowers = [], petals = [], bats = [], flies = [], stars = [], tufts = [];
-let wind = 0, gust = 0, fogX = 0, t = 0, last = performance.now();
+let flowers = [], petals = [], bats = [], flies = [], stars = [], skyStars = [], tufts = [];
+let wind = 0, gust = 0, fogX = 0, last = performance.now();
+let t = 0;   // garden clock: stops while the garden is out of view
+let T = 0;   // sky clock: always runs
 let meteors = [], nextMeteor = 3;
 let nextAuto = 2, nextBat = 5, auto = false, chosen = 'random', uid = 0;
 const pointer = { x: -999, y: -999, in: false, lastX: null };
 
+// camera: 0 = garden, 1 = sky
+let view = 'garden', cam = 0, camFrom = 0, camTo = 0, camP = 1;
+const CAM_DUR = RM ? .35 : 1.6, NEAR_SPEED = 1.5;
+let stoneGlow = 0, stoneHover = false, stoneRect = null;
+let openStar = null;
+
 const sizeScale = () => clamp(rows / 46, .55, 1.25);
 const maxFlowers = () => clamp(Math.floor(cols / 10), 4, 16);
+const farShift = () => cam * rows;
+const nearShift = () => cam * rows * NEAR_SPEED;
 
 function resize() {
   const r = stage.getBoundingClientRect();
@@ -161,12 +284,17 @@ function resize() {
   cols = Math.max(10, Math.floor(W / cw)); rows = Math.max(12, Math.floor(H / chH));
   ox = (W - cols * cw) / 2; oy = (H - rows * chH) / 2;
   ground = rows - 3;
-  gch = new Array(cols * rows).fill(''); gcl = new Array(cols * rows).fill('');
+  gch = new Array(cols * rows).fill(''); gcl = new Array(cols * rows).fill(''); gly = new Array(cols * rows).fill(0);
 
   stars = [];
   const ns = Math.round(cols * rows * .0045);
   for (let i = 0; i < ns; i++) stars.push({ c: Math.random() * cols | 0, r: Math.random() * rows * .55 | 0,
     ph: Math.random() * 6.28, sp: .4 + Math.random() * 1.4, ch: Math.random() < .14 ? '+' : '.' });
+  skyStars = [];
+  const skyW = cols * (1 + SKY_SCREENS * .5);   // the background drifts at half speed, so it needs half the width
+  const nss = Math.round(skyW * rows * .009);
+  for (let i = 0; i < nss; i++) skyStars.push({ c: Math.random() * skyW | 0, r: Math.random() * rows | 0,
+    ph: Math.random() * 6.28, sp: .3 + Math.random() * 1.2, ch: Math.random() < .1 ? '+' : '.', b: rand(.5, 1) });
   tufts = [];
   for (let c = 0; c < cols; c++) if (hash(c, 7) < .22) tufts.push({ c, ch: '"v\'|'[(hash(c, 9) * 4) | 0] });
   if (!flies.length) for (let i = 0; i < (RM ? 4 : 11); i++)
@@ -255,7 +383,7 @@ function drawMoon() {
     if (d2 > 1) {
       const d = Math.sqrt(d2);
       if (d > 1.25 && d < 1.42 && hash(dx + 40, dy + 40) < .3)
-        put(mx + dx, my + dy, '.', rgbs(mixc(BG, FOG, .35 + .2 * Math.sin(t * .7 + dx))));
+        put(mx + dx, my + dy, '.', rgbs(mixc(BG, FOG, .35 + .2 * Math.sin(T * .7 + dx))));
       continue;
     }
     const nz = Math.sqrt(1 - d2);
@@ -265,7 +393,7 @@ function drawMoon() {
     const ch = ramp[Math.min(9, (lum * 10) | 0)];
     if (ch !== ' ') put(mx + dx, my + dy, ch, rgbs(mixc(BG, MOON, .16 + .62 * lum)));
   }
-  return { x: ox + mx * cw, y: oy + my * chH, r: Rm * chH };
+  return { x: ox + mx * cw, y: oy + (my + farShift()) * chH, r: Rm * chH };
 }
 
 function drawFlower(f) {
@@ -344,8 +472,268 @@ function drawFlower(f) {
   }
 }
 
+/* ---------- the sky above ----------
+   Sky coordinates: column c, sky row sr (0 at the top of the sky screen). It sits one screen above
+   the garden, so it is drawn at world row sr - rows on the far plane. */
+
+/* ---------- constellations ----------
+   Each theme is a constellation. Its stars are laid out automatically: the first sits at the centre,
+   each later one branches off the star before it at an angle taken from its own hash, turning away
+   from anything it would crowd. Every device computes the same shape from the same stars.
+   The overview fits all constellations on one screen; zooming gives one the whole sky. */
+let themes = [], sealedList = [], liveStars = [];
+let groups = [];                        // constellations that have at least one star, in theme order
+const zoom = { id: null, p: 0, to: 0 }; // p: 0 = overview, 1 = zoomed into zoom.id
+function strHash(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) / 4294967296;
+}
+const starKey = s => s.ct ? s.ct.slice(0, 24) : `${s.sort}|${s.title}|${s.note.slice(0, 12)}`;
+
+function buildGroups() {
+  const byId = new Map(themes.map(t => [t.id, { ...t, stars: [], reveal: 0 }]));
+  const old = new Map(groups.map(g => [g.id, g]));
+  const ordered = [
+    ...sealedList.slice().sort((a, b) => String(a.sort).localeCompare(String(b.sort))),
+    ...liveStars.slice().sort((a, b) => (a.id ?? Infinity) - (b.id ?? Infinity)),
+  ];
+  for (const s of ordered) {
+    if (!byId.has(s.group)) byId.set(s.group, { id: s.group, name: 'Unnamed', stars: [], reveal: 0 });
+    byId.get(s.group).stars.push(s);
+  }
+  groups = [...byId.values()].filter(g => g.stars.length);
+  for (const g of groups) {
+    layoutGroup(g);
+    const was = old.get(g.id);
+    // keep lines already drawn; a newly added star's line then draws in on its own
+    g.reveal = was ? Math.min(was.reveal, g.stars.length - 1) : 0;
+  }
+  if (zoom.id && !groups.some(g => g.id === zoom.id)) { zoom.id = null; zoom.p = zoom.to = 0; }
+  rebuildSkyButtons();
+}
+
+function layoutGroup(g) {
+  const pts = [];
+  let dir = strHash(g.id) * Math.PI * 2;
+  g.stars.forEach((s, i) => {
+    if (i === 0) { pts.push({ u: 0, v: 0 }); return; }
+    // every star bends the path by a clear amount (25-70 degrees, either way), so it never runs dead straight
+    const p = pts[i - 1], k = starKey(s), h = strHash(k);
+    const turn = (h < .5 ? -1 : 1) * (.45 + Math.abs(h - .5) * 1.6), len = .95 + strHash(k + 'l') * .35;
+    let chosen = null;
+    for (const off of [0, .55, -.55, 1.1, -1.1, 1.7, -1.7, 2.4, -2.4, Math.PI]) {
+      const a = dir + turn + off, q = { u: p.u + Math.cos(a) * len, v: p.v + Math.sin(a) * len * .8 };
+      if (pts.every(o => Math.hypot(o.u - q.u, o.v - q.v) >= .72)) { chosen = { q, a }; break; }
+    }
+    if (!chosen) { const a = dir + turn; chosen = { q: { u: p.u + Math.cos(a) * 1.7, v: p.v + Math.sin(a) * 1.36 }, a }; }
+    pts.push(chosen.q); dir = chosen.a;
+  });
+  let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+  for (const p of pts) { u0 = Math.min(u0, p.u); u1 = Math.max(u1, p.u); v0 = Math.min(v0, p.v); v1 = Math.max(v1, p.v); }
+  g.pts = pts; g.bb = { u0, u1, v0, v1 };
+}
+
+/* The overview is a wide sky, several screens across, dragged sideways. Constellations sit along it
+   one after another, rising and falling a little; `pan` is how far the view has been dragged (in columns).
+   SKY_SCREENS sets how wide the background starfield is drawn. */
+const SKY_SCREENS = 4;
+let pan = 0, panV = 0, panTarget = null, dragging = null;
+const spacing = () => clamp(cols * .6, 34, 70);
+const firstCenter = () => Math.min(cols / 2, spacing() * .8);
+const worldCenter = i => firstCenter() + i * spacing();
+const maxPan = () => {
+  const lastGroup = groups.length ? worldCenter(groups.length - 1) + spacing() * .6 : 0;
+  return Math.max(0, lastGroup - cols);
+};
+// a constellation's overview cell, in screen columns/rows (world position minus the pan)
+function overviewBox(g) {
+  const i = groups.indexOf(g), sp = spacing();
+  const lift = (i % 2 ? 1 : -1) * rows * .07 + (strHash(g.id + 'y') - .5) * rows * .06;
+  return { c: worldCenter(i) - pan, r: rows * .44 + lift, w: sp * .82, h: rows * .52, maxS: Math.min(rows * .14, 6) };
+}
+function panToGroup(g) { panTarget = clamp(worldCenter(groups.indexOf(g)) - cols / 2, 0, maxPan()); }
+const zoomBox = () => ({ c: cols / 2, r: rows * .47, w: cols * .84, h: rows * .6, maxS: Math.min(rows * .17, 9) });
+function boxFor(g) {
+  const o = overviewBox(g);
+  if (g.id !== zoom.id || zoom.p === 0) return o;
+  const z = zoomBox(), e = easeInOut(zoom.p), L = (a, b) => a + (b - a) * e;
+  return { c: L(o.c, z.c), r: L(o.r, z.r), w: L(o.w, z.w), h: L(o.h, z.h), maxS: L(o.maxS, z.maxS) };
+}
+// positions of a constellation's stars in sky cols/rows for the current box
+function starPositions(g) {
+  const b = boxFor(g), asp = cw / chH, { u0, u1, v0, v1 } = g.bb;
+  const s = Math.min(b.maxS, b.h / Math.max(v1 - v0, .001), (b.w * asp) / Math.max(u1 - u0, .001));
+  const mu = (u0 + u1) / 2, mv = (v0 + v1) / 2;
+  return g.pts.map(p => ({ c: b.c + (p.u - mu) * s / asp, sr: b.r + (p.v - mv) * s }));
+}
+function groupVisibility(g) {
+  if (!zoom.id) return 1;
+  return g.id === zoom.id ? 1 : 1 - easeInOut(zoom.p);
+}
+const spaced = s => s.toUpperCase().split('').join(' ');
+
+function drawSky() {
+  // the far background turns at half the speed of the constellations, for a little depth
+  const bgPan = pan * .5;
+  for (const s of skyStars) {
+    const lum = .3 + .7 * Math.pow((Math.sin(T * s.sp + s.ph) + 1) / 2, 2);
+    put(s.c - bgPan, s.r - rows, s.ch, rgbs(mixc(BG, STAR, (.1 + .4 * lum) * s.b)));
+  }
+  // a faint band of haze winding along the sky
+  const bgShift = Math.floor(bgPan);
+  for (let sr = 0; sr < rows; sr++) for (let c = 0; c < cols; c++) {
+    const wc = c + bgShift;
+    const d = (sr - rows * (.55 + .22 * Math.sin(wc / cols * 2.1))) / (rows * .16);
+    const band = Math.exp(-d * d);
+    if (band < .2) continue;
+    const v = band * vnoise(wc * .14, sr * .3);
+    // speckled rather than filled, so the band reads as dust, not a block of dots
+    if (v > .38 && hash(wc + 501, sr + 77) < v * .45) {
+      const tw = .75 + .25 * Math.sin(T * .8 + wc * .7 + sr);
+      putE(c, sr - rows, v > .6 && hash(wc, sr + 9) < .3 ? ':' : '.', rgbs(mixc(BG, FOG, (.1 + .32 * v) * tw)));
+    }
+  }
+  const asp = cw / chH;
+  if (lock.state === 'open') drawConstellations(asp);
+  if (lock.state === 'locked' || lock.state === 'checking' || lock.state === 'opening') drawLock();
+  if (lock.state === 'dust') drawDust();
+}
+
+function drawConstellations(asp) {
+  const ze = zoom.id ? easeInOut(zoom.p) : 0;
+  for (const g of groups) {
+    const vis = groupVisibility(g);
+    if (vis < .04) continue;
+    const pos = starPositions(g), focused = g.id === zoom.id;
+    const big = focused ? ze : 0;   // stars grow arms as their constellation comes close
+    // lines: each one draws from the earlier star to the later as reveal grows
+    for (let i = 1; i < pos.length; i++) {
+      const p = clamp01(g.reveal - (i - 1));
+      if (p <= 0) break;
+      const a = pos[i - 1], b = pos[i], dc = b.c - a.c, dr = b.sr - a.sr;
+      const steps = Math.ceil(Math.hypot(dc * asp, dr) / 1.1);
+      for (let k = 1; k < steps; k++) {
+        const u = k / steps;
+        if (u > p) break;
+        if (u * steps < 1.4 || (1 - u) * steps < 1.4) continue;
+        putE(a.c + dc * u, a.sr + dr * u - rows, '.', rgbs(mixc(BG, MEM, .3 * vis)));
+      }
+    }
+    g.stars.forEach((m, i) => {
+      const { c, sr } = pos[i], r = sr - rows;
+      const lit = m === openStar || m.hover, tint = m.by === 'teri' ? TERI : MEM;
+      const pulse = .7 + .3 * Math.sin(T * 1.4 + i * 1.7 + g.stars.length);
+      const col = lit ? GOLD : mixc(BG, tint, (.55 + .45 * pulse) * vis);
+      if (big > .5) {
+        const arm = rgbs(mixc(BG, lit ? GOLD : tint, (.35 + .25 * pulse) * vis));
+        put(c - 1, r, '-', arm); put(c + 1, r, '-', arm);
+        put(c, r - 1, '.', arm); put(c, r + 1, "'", arm);
+      }
+      put(c, r, '*', rgbs(col));
+      sparkle(c, r, T - (m.born ?? -99), tint, asp);
+    });
+    // the name: under the constellation in the overview, across the top when zoomed in
+    const label = spaced(g.name);
+    if (!focused || ze < 1) {
+      const b = overviewBox(g), a = (1 - (focused ? ze : 0)) * vis * (g.hover ? .85 : .45);
+      // just under the constellation's lowest star
+      const r0 = Math.max(...pos.map(p => p.sr)) + 3;
+      if (a > .03) for (let i = 0; i < label.length; i++) put(b.c - label.length / 2 + i, r0 - rows, label[i], rgbs(mixc(BG, g.hover ? GOLD : MEM, a)));
+    }
+    if (focused && ze > 0) {
+      const r0 = Math.max(1, rows * .07);
+      for (let i = 0; i < label.length; i++) put(cols / 2 - label.length / 2 + i, r0 - rows, label[i], rgbs(mixc(BG, MEM, .6 * ze)));
+    }
+  }
+}
+
+function sparkle(c, r, age, col, asp) {
+  if (age < 0 || age > 1.4) return;
+  const rr = age * 5, fade = 1 - age / 1.4;
+  for (let k = 0; k < 8; k++) {
+    const a = k / 8 * 6.283;
+    putE(c + Math.cos(a) * rr / asp * .5, r + Math.sin(a) * rr * .5, '.', rgbs(mixc(BG, col, fade)));
+  }
+}
+
+/* ---------- the lock ----------
+   Rows 0-4 are the shackle, the rest the body; the passcode slots go on SLOT_ROW. */
+const LOCK = [
+  "     .-'''''-.     ",
+  "    / .-----. \\    ",
+  "   / /       \\ \\   ",
+  "   | |       | |   ",
+  "   | |       | |   ",
+  ".--'-'-------'-'--.",
+  "|                 |",
+  "|      .---.      |",
+  "|      | o |      |",
+  "|      '-v-'      |",
+  "|                 |",
+  "|                 |",
+  "'-----------------'",
+];
+const SHACKLE_ROWS = 5, SLOT_ROW = 11, LOCK_W = LOCK[0].length;
+const lock = { state: SEALED ? 'locked' : 'open', code: '', shake: 0, t: 0, dust: [] };
+const lockOrigin = () => ({ c0: Math.round(cols / 2 - LOCK_W / 2), sr0: Math.round(rows * .44 - LOCK.length / 2) });
+
+function drawLock() {
+  const { c0, sr0 } = lockOrigin();
+  const sx = lock.shake > 0 ? Math.round(Math.sin(T * 55) * 1.6 * Math.min(1, lock.shake * 2.5)) : 0;
+  const lift = lock.state === 'opening' ? Math.round(ease(clamp01(lock.t / .6)) * 2) : 0;
+  const bodyC = rgbs(mixc(BG, MEM, .5)), shackleC = rgbs(mixc(BG, STAR, .75)), holeC = rgbs(mixc(BG, GOLD, .8));
+  LOCK.forEach((ln, r) => {
+    const sh = r < SHACKLE_ROWS, rr = sr0 + r - (sh ? lift : 0) - rows;
+    const a = ln.search(/\S/), b = ln.trimEnd().length;
+    for (let i = a; i < b; i++) {
+      if (sh && ln[i] === ' ') continue;   // stars still show through the shackle's loop
+      put(c0 + i + sx, rr, ln[i], sh ? shackleC : (r > 6 && r < 10 && /[ov]/.test(ln[i]) ? holeC : bodyC));
+    }
+  });
+  // as the shackle rises, its left leg stays in the lock and the right one comes free
+  for (let k = 0; k < lift; k++) {
+    put(c0 + 3 + sx, sr0 + SHACKLE_ROWS - 1 - k - rows, '|', shackleC);
+    put(c0 + 5 + sx, sr0 + SHACKLE_ROWS - 1 - k - rows, '|', shackleC);
+  }
+  const focused = document.activeElement === codeInput;
+  for (let k = 0; k < 6; k++) {
+    const filled = k < lock.code.length, cursor = focused && k === lock.code.length && lock.state === 'locked';
+    const col = lock.shake > 0 ? [190, 52, 72] : filled ? GOLD : cursor && Math.sin(T * 6) > 0 ? MEM : mixc(BG, MEM, .35);
+    const ch = filled ? (lock.state === 'checking' && Math.sin(T * 9 + k) > 0 ? '+' : '*') : '_';
+    put(c0 + 4 + k * 2 + sx, sr0 + SLOT_ROW - rows, ch, rgbs(col));
+  }
+}
+
+function drawDust() {
+  for (const p of lock.dust) {
+    const k = easeInOut(clamp01((lock.t - .6 - p.d) / 1.3));
+    const swirl = Math.sin(k * Math.PI) * p.sw;
+    const x = p.x + (p.tx - p.x) * k + swirl, y = p.y + (p.ty - p.y) * k - swirl * .3;
+    const ch = k < .15 ? p.ch : k < .9 ? (p.d > .3 ? "'" : '.') : '*';
+    put(x, y - rows, ch, rgbs(mixc(BG, k < .5 ? MEM : GOLD, .4 + .5 * k)));
+  }
+}
+
+function crumbleLock() {
+  const { c0, sr0 } = lockOrigin();
+  lock.dust = [];
+  LOCK.forEach((ln, r) => {
+    for (let i = 0; i < ln.length; i++) {
+      if (ln[i] === ' ' || hash(i, r) > .7) continue;
+      // every grain of the lock drifts to one of the stars in the overview
+      const g = groups[(hash(i + 3, r + 5) * groups.length) | 0];
+      if (!g) continue;
+      const pos = starPositions(g), { c, sr } = pos[(hash(i + 7, r) * pos.length) | 0];
+      lock.dust.push({ x: c0 + i, y: sr0 + r - (r < SHACKLE_ROWS ? 2 : 0), tx: c, ty: sr, ch: ln[i],
+        d: hash(i + 9, r) * .5, sw: (hash(i, r + 11) - .5) * 8 });
+    }
+  });
+  lock.state = 'dust';
+}
+
 /* ---------- update ---------- */
-function update(dt) {
+function updateGarden(dt) {
   const breeze = (RM ? .3 : 1) * (Math.sin(t * .13) * .6 + Math.sin(t * .37 + 1) * .3);
   gust *= Math.exp(-dt * 1.1);
   wind += (breeze + gust - wind) * Math.min(1, dt * 2);
@@ -405,15 +793,6 @@ function update(dt) {
   for (const b of bats) { b.x += b.vx * dt; b.y += Math.sin(t * 3 + b.ph) * dt * 1.5; }
   bats = bats.filter(b => b.x > -6 && b.x < cols + 6);
 
-  nextMeteor -= dt;
-  if (nextMeteor <= 0) {
-    const d = Math.random() < .5 ? 1 : -1;
-    meteors.push({ x: rand(cols * .1, cols * .9), y: rand(1, rows * .22), vx: d * rand(30, 48), vy: rand(5, 10), age: 0, life: rand(.7, 1.1) });
-    nextMeteor = RM ? rand(25, 50) : rand(6, 18);
-  }
-  for (const m of meteors) { m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt; }
-  meteors = meteors.filter(m => m.age < m.life + .4);
-
   if (auto) {
     nextAuto -= dt;
     if (nextAuto <= 0) {
@@ -421,15 +800,74 @@ function update(dt) {
       nextAuto = rand(2.5, 5);
     }
   }
+
+  // the stone glows faintly every so often, and brightens under the cursor
+  const cycle = (t % 9) / 9;
+  const pulse = cycle > .7 ? Math.sin((cycle - .7) / .3 * Math.PI) : 0;
+  stoneGlow += ((stoneHover ? 1 : pulse * .75) - stoneGlow) * Math.min(1, dt * 4);
 }
+
+function updateSky(dt) {
+  nextMeteor -= dt;
+  if (nextMeteor <= 0) {
+    const d = Math.random() < .5 ? 1 : -1;
+    // world rows: the garden's upper sky when looking at the garden, the sky screen when up there
+    const top = view === 'sky' ? -rows : 0;
+    meteors.push({ x: rand(cols * .1, cols * .9), y: top + rand(1, rows * (view === 'sky' ? .6 : .22)),
+      vx: d * rand(30, 48), vy: rand(5, 10), age: 0, life: rand(.7, 1.1) });
+    nextMeteor = RM ? rand(25, 50) : rand(6, 18);
+  }
+  for (const m of meteors) { m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt; }
+  meteors = meteors.filter(m => m.age < m.life + .4);
+
+  if (camP < 1) {
+    camP = Math.min(1, camP + dt / CAM_DUR);
+    cam = camFrom + (camTo - camFrom) * easeInOut(camP);
+    if (camP === 1) onArrive();
+  }
+  if (lock.shake > 0) {
+    lock.shake = Math.max(0, lock.shake - dt);
+    if (lock.shake === 0) { lock.code = ''; codeInput.value = ''; }
+  }
+  if (lock.state === 'opening' || lock.state === 'dust') {
+    lock.t += dt;
+    if (lock.state === 'opening' && lock.t >= .6) crumbleLock();
+    if (lock.state === 'dust' && lock.t >= 2.5) { lock.state = 'open'; lock.dust = []; resetReveal(); }
+  }
+  if (view === 'sky' && camP === 1 && lock.state === 'open')
+    for (const g of groups) g.reveal = Math.min(g.stars.length - 1, g.reveal + dt * (RM ? 99 : 1.4));
+  if (view === 'sky') {
+    if (panTarget != null) {
+      pan += (panTarget - pan) * Math.min(1, dt * 6);
+      if (Math.abs(panTarget - pan) < .05) { pan = panTarget; panTarget = null; }
+    } else if (!dragging?.moved) {
+      pan += panV * dt; panV *= Math.exp(-dt * 4);
+      if (Math.abs(panV) < .5) panV = 0;
+    }
+    // drifting past either end springs back
+    if (!dragging?.moved) pan += (clamp(pan, 0, maxPan()) - pan) * Math.min(1, dt * 8);
+  }
+  if (zoom.p !== zoom.to) {
+    zoom.p = zoom.to > zoom.p ? Math.min(zoom.to, zoom.p + dt / (RM ? .2 : .8)) : Math.max(zoom.to, zoom.p - dt / (RM ? .2 : .8));
+    if (zoom.p === 0) { zoom.id = null; rebuildSkyButtons(); }
+    if (zoom.p === 1) rebuildSkyButtons();
+  }
+}
+function resetReveal() { for (const g of groups) g.reveal = 0; }
 
 /* ---------- compose + render ---------- */
 let moonGlow = { x: 0, y: 0, r: 1 };
 function compose() {
   gch.fill(''); gcl.fill('');
-  for (const s of stars) {
-    const lum = .3 + .7 * Math.pow((Math.sin(t * s.sp + s.ph) + 1) / 2, 2);
-    put(s.c, s.r, s.ch, rgbs(mixc(BG, STAR, .12 + .42 * lum)));
+  const far = farShift(), near = nearShift();
+
+  setPlane(0, far);
+  if (cam > 0) drawSky();
+  if (far < rows + 1) {
+    for (const s of stars) {
+      const lum = .3 + .7 * Math.pow((Math.sin(T * s.sp + s.ph) + 1) / 2, 2);
+      put(s.c, s.r, s.ch, rgbs(mixc(BG, STAR, .12 + .42 * lum)));
+    }
   }
   for (const m of meteors) {
     // head fades in then out; trail lingers a little after the head is gone
@@ -444,40 +882,46 @@ function compose() {
     }
   }
   moonGlow = drawMoon();
-  const sc = rgbs(STONE), tc = rgbs(STONE_TXT);
-  drawSprite(TOMBSTONE, clamp(Math.round(cols * .7), 1, Math.max(1, cols - 13)), ground - 1, ch => /[A-Z&]/.test(ch) ? tc : sc);
   for (const b of bats) {
     const s = ((t * 7 + b.ph) | 0) % 2 ? '^v^' : '-v-', c = rgbs(BAT);
     for (let i = 0; i < 3; i++) put(b.x - 1 + i, b.y, s[i], c);
   }
-  for (const tf of tufts) {
-    const w = wind + Math.sin(t * 1.3 + tf.c * .3) * .6;
-    put(tf.c, ground - 1, w > 1.2 ? '/' : w < -1.2 ? '\\' : tf.ch, rgbs(mixc(BG, [64, 88, 60], .7)));
-  }
-  for (const f of flowers) drawFlower(f);
-  for (const fl of flies) {
-    const g = Math.pow((Math.sin(t * fl.f * 2 + fl.ph) + 1) / 2, 3);
-    if (g < .05) continue;
-    put(fl.x, fl.y, g > .6 ? '*' : g > .25 ? '+' : '.', rgbs(mixc(BG, GOLD, .25 + .75 * g)));
-  }
-  for (const p of petals) {
-    const ch = p.y >= ground - .5 ? '.' : (Math.sin(t * 6 + p.ph) > 0 ? p.ch : "'");
-    put(p.x, p.y, ch, rgbs(mixc(BG, p.col, Math.min(1, p.life / 2))));
-  }
-  for (let r = ground - 7; r < ground; r++) {
-    const k = (r - (ground - 8)) / 8;
-    for (let c = 0; c < cols; c++) {
-      const v = vnoise(c * .09 + fogX, r * .6 + t * .05) * k;
-      if (v > .38) putE(c, r, v > .6 ? '~' : v > .48 ? '-' : '.', rgbs(mixc(BG, FOG, .14 + .38 * v)));
+
+  setPlane(1, near);
+  if (near < rows + 1) {
+    const c0 = clamp(Math.round(cols * .7), 1, Math.max(1, cols - 13));
+    stoneRect = { c0, c1: c0 + TOMBSTONE[0].length, r0: ground - TOMBSTONE.length, r1: ground - 1 };
+    const sc = rgbs(mixc(STONE, [104, 94, 108], stoneGlow * .6)), tc = rgbs(mixc(STONE_TXT, MEM, stoneGlow));
+    drawSprite(TOMBSTONE, c0, ground - 1, ch => /[A-Z&]/.test(ch) ? tc : sc);
+    for (const tf of tufts) {
+      const w = wind + Math.sin(t * 1.3 + tf.c * .3) * .6;
+      put(tf.c, ground - 1, w > 1.2 ? '/' : w < -1.2 ? '\\' : tf.ch, rgbs(mixc(BG, [64, 88, 60], .7)));
     }
-  }
-  const g0 = rgbs(mixc(BG, [72, 82, 62], .75)), g1 = rgbs([58, 48, 54]), g2 = rgbs([40, 33, 40]);
-  for (let c = 0; c < cols; c++) {
-    const h = hash(c, 3);
-    put(c, ground, h < .55 ? '_' : h < .7 ? '.' : h < .82 ? ',' : h < .9 ? '`' : '_', g0);
-    const h2 = hash(c, 5);
-    if (h2 < .25) put(c, ground + 1, h2 < .07 ? ':' : '.', g1);
-    if (hash(c, 11) < .12) put(c, ground + 2, '.', g2);
+    for (const f of flowers) drawFlower(f);
+    for (const fl of flies) {
+      const g = Math.pow((Math.sin(t * fl.f * 2 + fl.ph) + 1) / 2, 3);
+      if (g < .05) continue;
+      put(fl.x, fl.y, g > .6 ? '*' : g > .25 ? '+' : '.', rgbs(mixc(BG, GOLD, .25 + .75 * g)));
+    }
+    for (const p of petals) {
+      const ch = p.y >= ground - .5 ? '.' : (Math.sin(t * 6 + p.ph) > 0 ? p.ch : "'");
+      put(p.x, p.y, ch, rgbs(mixc(BG, p.col, Math.min(1, p.life / 2))));
+    }
+    for (let r = ground - 7; r < ground; r++) {
+      const k = (r - (ground - 8)) / 8;
+      for (let c = 0; c < cols; c++) {
+        const v = vnoise(c * .09 + fogX, r * .6 + t * .05) * k;
+        if (v > .38) putE(c, r, v > .6 ? '~' : v > .48 ? '-' : '.', rgbs(mixc(BG, FOG, .14 + .38 * v)));
+      }
+    }
+    const g0 = rgbs(mixc(BG, [72, 82, 62], .75)), g1 = rgbs([58, 48, 54]), g2 = rgbs([40, 33, 40]);
+    for (let c = 0; c < cols; c++) {
+      const h = hash(c, 3);
+      put(c, ground, h < .55 ? '_' : h < .7 ? '.' : h < .82 ? ',' : h < .9 ? '`' : '_', g0);
+      const h2 = hash(c, 5);
+      if (h2 < .25) put(c, ground + 1, h2 < .07 ? ':' : '.', g1);
+      if (hash(c, 11) < .12) put(c, ground + 2, '.', g2);
+    }
   }
 }
 
@@ -494,7 +938,7 @@ function render() {
       if (!ch) continue;
       const col = gcl[i];
       if (col !== lastCol) { ctx.fillStyle = col; lastCol = col; }
-      ctx.fillText(ch, ox + c * cw, y);
+      ctx.fillText(ch, ox + c * cw, y + planeFrac[gly[i]]);
     }
   }
   const vg = ctx.createRadialGradient(W / 2, H * .45, Math.min(W, H) * .35, W / 2, H * .45, Math.max(W, H) * .8);
@@ -502,32 +946,504 @@ function render() {
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
 }
 
-
 function frame(now) {
-  const dt = Math.min(.05, (now - last) / 1000); last = now; t += dt;
-  update(dt); compose(); render();
+  const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
+  if (view === 'garden') { t += dt; updateGarden(dt); }
+  updateSky(dt); compose(); render(); placeOverlay();
   requestAnimationFrame(frame);
+}
+
+/* ---------- camera + views ---------- */
+const ctlGarden = document.getElementById('ctlGarden'), ctlSky = document.getElementById('ctlSky');
+const downBtn = document.getElementById('down');
+const memLayer = document.getElementById('memLayer');
+const codeInput = document.getElementById('code');
+const card = document.getElementById('card');
+
+function panTo(target) {
+  camFrom = cam; camTo = target; camP = 0;
+}
+function goSky(instant) {
+  if (view === 'sky') return;
+  view = 'sky'; stoneHover = false;
+  resetReveal(); zoom.id = null; zoom.p = zoom.to = 0; pan = 0; panV = 0; panTarget = null; rebuildSkyButtons();
+  pointer.in = false; pointer.lastX = null;
+  ctlGarden.inert = true; ctlSky.inert = false;
+  try { history.replaceState(null, '', '#sky'); } catch (e) {}
+  if (instant) {
+    // opening straight into the sky: no fade, the garden buttons are simply not there
+    for (const el of [ctlGarden, ctlSky]) { el.style.transition = 'none'; requestAnimationFrame(() => requestAnimationFrame(() => { el.style.transition = ''; })); }
+    cam = camTo = 1; camP = 1; onArrive();
+  } else panTo(1);
+  updateCursor();
+}
+function goGarden() {
+  if (view === 'garden') return;
+  view = 'garden'; closeStarForm(); closeCard();
+  downBtn.inert = true; codeInput.blur(); syncOverlay();
+  ctlSky.inert = true; ctlGarden.inert = false;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+  panTo(0);
+  updateCursor();
+}
+function onArrive() {
+  if (view !== 'sky') return;
+  downBtn.inert = false;
+  syncOverlay();
+  // on a computer, start typing straight away; on phones wait for a tap so the keypad isn't forced open
+  if (lock.state === 'locked' && matchMedia('(hover: hover)').matches) codeInput.focus({ preventScroll: true });
+}
+
+/* ---------- unlocking ---------- */
+const KEY_STORE = 'nightshade-unlock';
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const tob64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+async function openSeal(key) {
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(SEALED.iv) }, key, unb64(SEALED.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function tryCode(code) {
+  // browsers only offer the decryption on https:// pages and localhost; say so instead of rattling as if the code were wrong
+  if (!window.crypto?.subtle) {
+    lock.code = ''; codeInput.value = '';
+    toast('The lock only opens on a secure (https) address');
+    return;
+  }
+  lock.state = 'checking';
+  try {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(code), 'PBKDF2', false, ['deriveKey']);
+    const key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: unb64(SEALED.salt), iterations: SEALED.it, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+    const sealed = await openSeal(key);
+    // remember the derived key (not the code) so this device opens straight away next time
+    try { localStorage.setItem(KEY_STORE, JSON.stringify({ salt: SEALED.salt, k: tob64(await crypto.subtle.exportKey('raw', key)) })); } catch (e) {}
+    unlockKey = key; useSealed(sealed);
+    loadStars();
+    codeInput.blur();
+    if (RM) { lock.state = 'open'; resetReveal(); } else { lock.state = 'opening'; lock.t = 0; }
+  } catch (e) {
+    lock.state = 'locked'; lock.shake = .6;
+  }
+}
+async function restoreUnlock() {
+  if (!SEALED) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY_STORE) || 'null');
+    if (!saved || saved.salt !== SEALED.salt) return;
+    const key = await crypto.subtle.importKey('raw', unb64(saved.k), 'AES-GCM', false, ['encrypt', 'decrypt']);
+    useSealed(await openSeal(key));
+    unlockKey = key;
+    lock.state = 'open';
+    loadStars();
+  } catch (e) {
+    try { localStorage.removeItem(KEY_STORE); } catch (e2) {}
+  }
+}
+/* ---------- stars and constellations added from the sky ----------
+   Each row is encrypted with the unlock key before it leaves the browser: either a star
+   ({kind:'star', group, sort, title, note, by}) or a new constellation ({kind:'theme', id, name}).
+   Rows that don't open with this key (junk, or written under another passcode) are skipped. */
+let unlockKey = null, starsLoaded = false, starsReady = false;
+const starIds = new Set();
+const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+function cleanStar(s) {
+  if (!s || typeof s !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(s.sort) || !str(s.group, 40)) return null;
+  return { group: str(s.group, 40), sort: s.sort, date: fmtDate(s.sort), title: str(s.title, 60), note: str(s.note, 600), by: s.by === 'teri' ? 'teri' : 'alex' };
+}
+function cleanTheme(t) {
+  if (!t || typeof t !== 'object' || !str(t.id, 40) || !str(t.name, 24).trim()) return null;
+  return { id: str(t.id, 40), name: str(t.name, 24).trim(), notes: !!t.notes };
+}
+function useSealed(sealed) {
+  // older seals were a plain list of memories with no themes
+  const data = Array.isArray(sealed) ? { themes: [], memories: sealed } : sealed;
+  themes = (data.themes || []).map(cleanTheme).filter(Boolean);
+  sealedList = (data.memories || []).map(m => ({ ...m, group: m.group || 'memories' }));
+  buildGroups();
+}
+async function addRow(row, quiet) {
+  if (starIds.has(row.id)) return false;
+  const mine = liveStars.find(s => s.id == null && s.ct === row.ct);   // our own save echoing back
+  if (mine) { mine.id = row.id; starIds.add(row.id); return false; }
+  try {
+    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(row.iv) }, unlockKey, unb64(row.ct));
+    const d = JSON.parse(new TextDecoder().decode(pt));
+    if (starIds.has(row.id)) return false;
+    if (d.kind === 'theme') {
+      const t = cleanTheme(d);
+      if (!t || themes.some(x => x.id === t.id)) return false;
+      starIds.add(row.id); themes.push(t);
+      return true;
+    }
+    const s = cleanStar(d);
+    if (!s) return false;
+    starIds.add(row.id);
+    liveStars.push({ ...s, id: row.id, ct: row.ct, born: quiet ? -99 : T });
+    return true;
+  } catch (e) { return false; }
+}
+async function loadStars() {
+  syncOverlay();
+  if (starsLoaded || !db || !unlockKey) return;
+  starsLoaded = true;
+  const { data, error } = await db.from('stars').select('id,iv,ct').order('id').limit(1000);
+  if (error) { starsLoaded = false; return; }
+  for (const row of data) await addRow(row, true);
+  starsReady = true;
+  buildGroups(); syncOverlay();
+  db.channel('stars')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stars' }, ({ new: row }) => {
+      addRow(row).then(added => { if (added) buildGroups(); });
+    })
+    .subscribe();
+}
+async function insertSealed(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = tob64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, unlockKey, new TextEncoder().encode(JSON.stringify(obj))));
+  return { ct, send: () => db.from('stars').insert({ iv: tob64(iv), ct }).select('id').single() };
+}
+async function saveStar(f) {
+  let group = f.group;
+  if (group === NEW_THEME) {
+    const t = cleanTheme({ id: 'c' + tob64(crypto.getRandomValues(new Uint8Array(6))).replace(/[^a-z0-9]/gi, ''), name: f.newName });
+    if (!t) return false;
+    const row = await insertSealed({ kind: 'theme', ...t });
+    const { data, error } = await row.send();
+    if (error) { toast("Couldn't create the constellation. Try again in a minute."); return false; }
+    starIds.add(data.id); themes.push(t); group = t.id;
+  }
+  const s = cleanStar({ ...f, group });
+  if (!s) return false;
+  const row = await insertSealed({ kind: 'star', ...s });
+  const local = { ...s, id: null, ct: row.ct, born: T };
+  liveStars.push(local); buildGroups();
+  const { data, error } = await row.send();
+  if (error) {
+    liveStars.splice(liveStars.indexOf(local), 1); buildGroups();
+    toast("Couldn't save the star. Try again in a minute.");
+    return false;
+  }
+  if (local.id == null) { local.id = data.id; starIds.add(data.id); }
+  toast('Star added');
+  return group;
+}
+
+/* ---------- the "Add a star" form ---------- */
+const NEW_THEME = '__new';
+const starBtn = document.getElementById('addStar'), starForm = document.getElementById('starForm');
+const sfGroup = document.getElementById('sfGroup'), sfNewWrap = document.getElementById('sfNewWrap'), sfNew = document.getElementById('sfNew');
+const sfDate = document.getElementById('sfDate'), sfTitle = document.getElementById('sfTitle'), sfTitleWrap = document.getElementById('sfTitleWrap');
+const sfNote = document.getElementById('sfNote');
+const byBtns = [...document.querySelectorAll('#sfBy button')];
+let author = 'alex';
+try { author = localStorage.getItem('nightshade-author') === 'teri' ? 'teri' : 'alex'; } catch (e) {}
+function setAuthor(by) {
+  author = by;
+  byBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.by === by)));
+  try { localStorage.setItem('nightshade-author', by); } catch (e) {}
+}
+setAuthor(author);
+byBtns.forEach(b => b.addEventListener('click', () => setAuthor(b.dataset.by)));
+
+const isNotes = id => !!themes.find(t => t.id === id)?.notes;
+function syncFormFields() {
+  const g = sfGroup.value;
+  sfNewWrap.hidden = g !== NEW_THEME;
+  sfTitleWrap.hidden = isNotes(g);   // a notes-only constellation takes just the note
+  placeForm();
+}
+sfGroup.addEventListener('change', syncFormFields);
+function openStarForm() {
+  closeCard();
+  sfGroup.replaceChildren(
+    ...themes.map(t => new Option(t.name, t.id)),
+    new Option('New constellation…', NEW_THEME));
+  sfGroup.value = zoom.id && themes.some(t => t.id === zoom.id) ? zoom.id : (themes[0]?.id ?? NEW_THEME);
+  const d = new Date();
+  sfDate.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  sfTitle.value = ''; sfNote.value = ''; sfNew.value = '';
+  starForm.hidden = false;
+  starBtn.setAttribute('aria-pressed', 'true');
+  syncFormFields();
+  (sfTitleWrap.hidden ? sfNote : sfTitle).focus({ preventScroll: true });
+}
+function closeStarForm() { starForm.hidden = true; starBtn.setAttribute('aria-pressed', 'false'); }
+function placeForm() {
+  if (starForm.hidden) return;
+  starForm.style.left = Math.max(8, (W - starForm.offsetWidth) / 2) + 'px';
+  starForm.style.top = clamp((H - starForm.offsetHeight) / 2 - 10, 8, Math.max(8, H - starForm.offsetHeight - 8)) + 'px';
+}
+starBtn.addEventListener('click', () => starForm.hidden ? openStarForm() : closeStarForm());
+document.getElementById('sfCancel').addEventListener('click', closeStarForm);
+starForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const g = sfGroup.value, notes = isNotes(g);
+  if (!sfDate.value || !sfNote.value.trim() || (!notes && !sfTitle.value.trim()) || (g === NEW_THEME && !sfNew.value.trim())) return;
+  const save = document.getElementById('sfSave');
+  save.disabled = true;
+  const saved = await saveStar({ group: g, newName: sfNew.value.trim(), sort: sfDate.value,
+    title: notes ? '' : sfTitle.value.trim(), note: sfNote.value.trim(), by: author });
+  save.disabled = false;
+  if (saved) { closeStarForm(); if (zoom.id !== saved) zoomTo(saved); }
+});
+
+codeInput.addEventListener('input', () => {
+  if (lock.state !== 'locked') { codeInput.value = lock.code; return; }
+  lock.code = codeInput.value.replace(/\D/g, '').slice(0, 6);
+  codeInput.value = lock.code;
+  if (lock.code.length === 6) tryCode(lock.code);
+});
+
+/* ---------- moving between constellations ---------- */
+function zoomTo(id) {
+  const target = groups.find(g => g.id === id);
+  if (!target) return;
+  closeCard();
+  panToGroup(target);
+  if (zoom.id && zoom.id !== id && zoom.p > 0) {
+    // already zoomed: swap straight to the next one and let its lines draw in again
+    zoom.id = id; zoom.p = zoom.to = 1;
+    groups.find(g => g.id === id).reveal = 0;
+    rebuildSkyButtons();
+    return;
+  }
+  zoom.id = id; zoom.to = 1; rebuildSkyButtons();
+}
+function zoomOut() { closeCard(); zoom.to = 0; rebuildSkyButtons(); }
+function stepZoom(dir) {
+  if (!zoom.id || groups.length < 2) return;
+  const i = groups.findIndex(g => g.id === zoom.id);
+  zoomTo(groups[(i + dir + groups.length) % groups.length].id);
+}
+
+// invisible buttons over the sky: a constellation each in the overview, a star each when zoomed in.
+// They give keyboard focus, screen-reader labels, and a finger-sized hit area.
+let skyBtns = [];
+const navPrev = document.getElementById('navPrev'), navNext = document.getElementById('navNext');
+// the side arrows: next/previous constellation when zoomed in, a step along the sky in the overview
+function stepSky(dir) {
+  if (zoom.id) return stepZoom(dir);
+  panTarget = clamp((panTarget ?? pan) + dir * spacing(), 0, maxPan());
+}
+navPrev.addEventListener('click', () => stepSky(-1));
+navNext.addEventListener('click', () => stepSky(1));
+
+// dragging the overview sideways, with a little glide after letting go
+let suppressClick = false;
+stage.addEventListener('pointerdown', e => {
+  if (view !== 'sky' || camP < 1 || zoom.id || lock.state !== 'open' || !starForm.hidden) return;
+  if (e.target.closest?.('.nav, .down, .card')) return;
+  dragging = { x: e.clientX, pan, moved: false, lastX: e.clientX, lastT: performance.now(), v: 0 };
+  panTarget = null; panV = 0;
+});
+addEventListener('pointermove', e => {
+  if (!dragging) return;
+  const dx = e.clientX - dragging.x;
+  if (Math.abs(dx) > 6) dragging.moved = true;
+  if (!dragging.moved) return;
+  pan = clamp(dragging.pan - dx / cw, -4, maxPan() + 4);
+  const now = performance.now(), dt = Math.max(8, now - dragging.lastT);
+  dragging.v = -(e.clientX - dragging.lastX) / cw / (dt / 1000);
+  dragging.lastX = e.clientX; dragging.lastT = now;
+});
+addEventListener('pointerup', () => {
+  if (!dragging) return;
+  if (dragging.moved) {
+    panV = clamp(dragging.v, -150, 150);
+    // a drag that started on a constellation shouldn't also open it
+    suppressClick = true; setTimeout(() => { suppressClick = false; }, 0);
+  }
+  dragging = null;
+});
+memLayer.addEventListener('click', e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
+stage.addEventListener('wheel', e => {
+  if (view !== 'sky' || zoom.id || lock.state !== 'open') return;
+  e.preventDefault();
+  panTarget = null; panV = 0;
+  pan = clamp(pan + (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / cw * .6, 0, maxPan());
+}, { passive: false });
+function rebuildSkyButtons() {
+  memLayer.replaceChildren();
+  skyBtns = [];
+  if (zoom.id && zoom.p === 1) {
+    const g = groups.find(x => x.id === zoom.id);
+    if (!g) return;
+    g.stars.forEach((m, i) => {
+      const b = document.createElement('button');
+      b.className = 'mem';
+      b.setAttribute('aria-label', `${m.date}: ${m.title || m.note.replace(/\s+/g, ' ').slice(0, 40)}`);
+      b.addEventListener('click', e => { e.stopPropagation(); openStar === m ? closeCard() : openCard(m); });
+      b.addEventListener('pointerenter', () => { m.hover = true; });
+      b.addEventListener('pointerleave', () => { m.hover = false; });
+      memLayer.appendChild(b);
+      skyBtns.push({ b, g, i });
+    });
+  } else if (!zoom.id) {
+    for (const g of groups) {
+      const b = document.createElement('button');
+      b.className = 'mem group';
+      b.setAttribute('aria-label', `${g.name}, ${g.stars.length} ${g.stars.length === 1 ? 'star' : 'stars'}`);
+      b.addEventListener('click', e => { e.stopPropagation(); zoomTo(g.id); });
+      b.addEventListener('focus', () => { if (!dragging) panToGroup(g); });   // tabbing brings it into view
+      b.addEventListener('pointerenter', () => { g.hover = true; });
+      b.addEventListener('pointerleave', () => { g.hover = false; });
+      memLayer.appendChild(b);
+      skyBtns.push({ b, g });
+    }
+  }
+}
+memLayer.hidden = true;
+
+// which overlay controls exist right now
+function syncOverlay() {
+  const up = view === 'sky' && camP === 1;
+  const showMem = up && lock.state === 'open', showCode = up && (lock.state === 'locked' || lock.state === 'checking');
+  if (memLayer.hidden === showMem) memLayer.hidden = !showMem;
+  if (codeInput.hidden === showCode) { codeInput.hidden = !showCode; if (!showCode) codeInput.blur(); }
+  // only offered once the stars table has answered, so a missing table never eats someone's writing
+  const canAdd = up && lock.state === 'open' && starsReady;
+  if (starBtn.hidden === canAdd) starBtn.hidden = !canAdd;
+  // zoomed in: arrows step between constellations; overview: they show there is more sky that way
+  const zoomed = !!zoom.id && zoom.p === 1;
+  const showPrev = showMem && (zoomed ? groups.length > 1 : !zoom.id && pan > .5);
+  const showNext = showMem && (zoomed ? groups.length > 1 : !zoom.id && pan < maxPan() - .5);
+  if (navPrev.hidden === showPrev) navPrev.hidden = !showPrev;
+  if (navNext.hidden === showNext) navNext.hidden = !showNext;
+  const prevLabel = zoomed ? 'Previous constellation' : 'Move the sky left', nextLabel = zoomed ? 'Next constellation' : 'Move the sky right';
+  if (navPrev.getAttribute('aria-label') !== prevLabel) { navPrev.setAttribute('aria-label', prevLabel); navNext.setAttribute('aria-label', nextLabel); }
+  const label = zoom.id ? 'Back to all constellations' : 'Back to the garden';
+  if (downBtn.getAttribute('aria-label') !== label) downBtn.setAttribute('aria-label', label);
+}
+
+function placeOverlay() {
+  syncOverlay();
+  placeForm();
+  const shiftPx = (farShift() - rows) * chH;
+  if (!codeInput.hidden) {
+    const { c0, sr0 } = lockOrigin();
+    codeInput.style.left = (ox + c0 * cw) + 'px';
+    codeInput.style.top = (oy + sr0 * chH + shiftPx) + 'px';
+    codeInput.style.width = (LOCK_W * cw) + 'px';
+    codeInput.style.height = (LOCK.length * chH) + 'px';
+  }
+  if (memLayer.hidden && card.hidden) return;
+  const posCache = new Map();
+  const posOf = g => posCache.get(g) || (posCache.set(g, starPositions(g)), posCache.get(g));
+  for (const { b, g, i } of skyBtns) {
+    if (i == null) {
+      // the whole constellation's cell, with its name underneath
+      const box = overviewBox(g);
+      b.style.left = (ox + (box.c - box.w / 2) * cw) + 'px';
+      b.style.top = (oy + (box.r - box.h / 2) * chH + shiftPx) + 'px';
+      b.style.width = (box.w * cw) + 'px';
+      b.style.height = ((box.h + 3) * chH) + 'px';
+    } else {
+      const { c, sr } = posOf(g)[i];
+      b.style.left = (ox + (c + .5) * cw - 16) + 'px';
+      b.style.top = (oy + (sr + .5) * chH + shiftPx - 16) + 'px';
+    }
+  }
+  if (!card.hidden && openStar) {
+    const g = groups.find(x => x.stars.includes(openStar));
+    if (!g) { closeCard(); return; }
+    const { c, sr } = posOf(g)[g.stars.indexOf(openStar)];
+    placeNear(card, ox + (c + .5) * cw, oy + (sr + .5) * chH + shiftPx);
+  }
+}
+// beside a point in the sky: to its right if there is room, otherwise to its left, always on screen
+function placeNear(el, sx, sy) {
+  const w = el.offsetWidth, h = el.offsetHeight;
+  let left = sx + 22 + w > W - 8 ? sx - 22 - w : sx + 22;
+  left = clamp(left, 8, Math.max(8, W - w - 8));
+  const top = clamp(sy - 24, 8, Math.max(8, H - h - 52));
+  el.style.left = left + 'px'; el.style.top = top + 'px';
+}
+function openCard(m) {
+  if (view !== 'sky') return;
+  openStar = m;
+  document.getElementById('cardDate').textContent = m.by && m.id !== undefined ? `${m.date} · ${m.by === 'teri' ? 'Teri' : 'Alex'}` : m.date;
+  const title = document.getElementById('cardTitle');
+  title.textContent = m.title; title.hidden = !m.title;
+  document.getElementById('cardNote').textContent = m.note;
+  card.hidden = false;
+  placeOverlay();
+}
+function closeCard(refocus) {
+  if (!openStar && card.hidden) return;
+  const was = openStar;
+  openStar = null; card.hidden = true;
+  if (refocus && was) skyBtns.find(x => x.g.stars?.[x.i] === was)?.b.focus();
+}
+
+function updateCursor() {
+  stage.style.cursor = view === 'sky' ? 'default' : (stoneHover ? 'pointer' : 'crosshair');
+}
+
+/* ---------- the shared database (stars added from the sky) ---------- */
+let db = null;
+function loadScript(src) {
+  return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); });
+}
+async function connect() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+  try {
+    await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js');
+    db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    loadStars();
+  } catch (e) {
+    db = null;
+  }
 }
 
 /* ---------- input ---------- */
 function toast(msg) {
   toastEl.textContent = msg; toastEl.hidden = false;
-  clearTimeout(toast.h); toast.h = setTimeout(() => { toastEl.hidden = true; }, 1800);
+  clearTimeout(toast.h); toast.h = setTimeout(() => { toastEl.hidden = true; }, 2000);
 }
 function local(e) { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+function overStone(p) {
+  if (!stoneRect || cam !== 0) return false;
+  const c = (p.x - ox) / cw, r = (p.y - oy) / chH;
+  return c >= stoneRect.c0 && c < stoneRect.c1 && r >= stoneRect.r0 && r < stoneRect.r1 + 1;
+}
 stage.addEventListener('pointermove', e => {
+  if (view !== 'garden' || camP < 1) return;
   const p = local(e);
   if (pointer.lastX !== null) gust = clamp(gust + (p.x - pointer.lastX) * (e.buttons ? .02 : .01), -6, 6);
   pointer.lastX = p.x; pointer.x = p.x; pointer.y = p.y; pointer.in = true;
+  const h = overStone(p);
+  if (h !== stoneHover) { stoneHover = h; updateCursor(); }
 });
-stage.addEventListener('pointerleave', () => { pointer.in = false; pointer.lastX = null; });
+// a sideways swipe while zoomed in moves to the neighbouring constellation
+let swipe = null;
+stage.addEventListener('pointerup', e => {
+  if (!swipe || view !== 'sky') { swipe = null; return; }
+  const p = local(e), dx = p.x - swipe.x, dy = p.y - swipe.y;
+  if (zoom.id && zoom.p === 1 && Math.abs(dx) > 60 && Math.abs(dy) < 50 && performance.now() - swipe.t < 700) stepZoom(dx < 0 ? 1 : -1);
+  swipe = null;
+});
+stage.addEventListener('pointerleave', () => { pointer.in = false; pointer.lastX = null; if (stoneHover) { stoneHover = false; updateCursor(); } });
 stage.addEventListener('pointerdown', e => {
-  const p = local(e); pointer.x = p.x; pointer.y = p.y; pointer.lastX = p.x; pointer.in = e.pointerType === 'mouse';
-  const cx = (p.x - ox) / cw, cy = (p.y - oy) / chH, asp = cw / chH;
+  if (e.target !== cv || camP < 1) return;
+  const p = local(e);
+  const cx = (p.x - ox) / cw, cy = (p.y - oy) / chH;
+
+  if (view === 'sky') {
+    if (!starForm.hidden) return;   // don't lose a half-written star to a stray tap
+    swipe = { x: p.x, y: p.y, t: performance.now() };
+    closeCard();
+    return;
+  }
+
+  pointer.x = p.x; pointer.y = p.y; pointer.lastX = p.x; pointer.in = e.pointerType === 'mouse';
+  const asp = cw / chH;
   for (let i = flowers.length - 1; i >= 0; i--) {
     const f = flowers[i];
     if (f.R > 1 && f.P && f.P.w === 0 && Math.hypot((cx - f.cx) * asp, (cy - f.cy) / f.S.tilt) < f.R * 1.05) { scatter(f); return; }
   }
+  if (overStone(p)) { goSky(); return; }
   plant(clamp(cx / cols, .02, .98), chosen, { depth: 1 });
 });
 
@@ -572,19 +1488,40 @@ document.getElementById('gust').addEventListener('click', doGust);
 document.getElementById('scatter').addEventListener('click', scatterAll);
 autoBtn.addEventListener('click', toggleAuto);
 document.getElementById('copy').addEventListener('click', copyFrame);
+downBtn.addEventListener('click', () => zoom.id ? zoomOut() : goGarden());
 addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
+  if (e.target === codeInput || e.target.closest?.('#starForm')) { if (k === 'escape') e.target.blur(); return; }
+  // typing a digit at the lock goes into the code even if the box lost focus
+  if (view === 'sky' && lock.state === 'locked' && !codeInput.hidden && /^[0-9]$/.test(k)) { codeInput.focus({ preventScroll: true }); return; }
+  if (k === 'escape') {
+    if (!starForm.hidden) closeStarForm();
+    else if (!card.hidden) closeCard(true);
+    else if (zoom.id) zoomOut();
+    else goGarden();
+    return;
+  }
+  if (view === 'sky') {
+    if (k === 'c') copyFrame();
+    else if (k === 'arrowright') stepSky(1);
+    else if (k === 'arrowleft') stepSky(-1);
+    return;
+  }
   if (k >= '1' && k <= '5') choose(['random', ...KEYS][+k - 1]);
   else if (k === ' ') { e.preventDefault(); doGust(); }
   else if (k === 's') scatterAll();
   else if (k === 'a') toggleAuto();
   else if (k === 'c') copyFrame();
 });
+addEventListener('hashchange', () => { if (location.hash === '#sky') goSky(); });
 
 new ResizeObserver(resize).observe(stage);
 resize();
 if (document.fonts) document.fonts.load(`14px "IBM Plex Mono"`).then(resize, () => {});
+if (location.hash === '#sky') goSky(true);
+restoreUnlock();
+connect();
 requestAnimationFrame(frame);
 })();
 </script>
