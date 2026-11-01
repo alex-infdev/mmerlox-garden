@@ -5,6 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Nightshade Garden for my wife</title>
 <meta name="description" content="An interactive ASCII garden of night flowers blooming under the moon. Made with love for my love.">
+<!-- on a phone's home screen: its own icon, opening full-screen like an app -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#0b090e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Nightshade">
+<!-- the picture and words shown when the link is shared in a chat -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="Nightshade Garden for my wife">
+<meta property="og:description" content="An interactive ASCII garden of night flowers blooming under the moon. Made with love for my love.">
+<meta property="og:url" content="https://alex-infdev.github.io/mmerlox-garden/">
+<meta property="og:image" content="https://alex-infdev.github.io/mmerlox-garden/preview.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A night garden drawn in text: blooming flowers, a moon, a music box and a tombstone reading Alex and Teri">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IM+Fell+English:ital@0;1&display=swap">
@@ -69,6 +88,8 @@ button[aria-pressed="true"]{background:var(--blood-dim);border-color:var(--blood
 .card-title{margin:0 0 6px;font-weight:400;font-size:19px;line-height:1.2;color:var(--bone);text-wrap:balance}
 .card-note{margin:0;font-size:15px;line-height:1.45;color:var(--ash);white-space:pre-line}
 .card{max-height:calc(100% - 16px);overflow:auto}
+.whocard{width:auto;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
+.whocard .seg{justify-content:center;margin-top:8px}
 .starform{width:min(300px,calc(100% - 16px));max-height:calc(100% - 16px);overflow:auto}
 .fld{display:grid;gap:4px;margin:0 0 10px}
 .fld>span{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ash)}
@@ -138,6 +159,13 @@ button:disabled{opacity:.5;cursor:default}
         <button type="submit" id="sfSave" class="primary">Save star</button>
       </div>
     </form>
+    <div class="card whocard" id="whoCard" role="dialog" aria-labelledby="whoTitle" hidden>
+      <p class="card-date" id="whoTitle">Who's here?</p>
+      <div class="seg">
+        <button type="button" data-me="alex">Alex</button>
+        <button type="button" data-me="teri">Teri</button>
+      </div>
+    </div>
     <button class="nav prev" id="navPrev" aria-label="Previous constellation" hidden><span>&lt;</span></button>
     <button class="nav next" id="navNext" aria-label="Next constellation" hidden><span>&gt;</span></button>
     <button class="down" id="down" aria-label="Back to the garden" inert><span>v</span></button>
@@ -374,11 +402,19 @@ function drawSprite(lines, c0, bottomRow, colFor) {
     for (let i = a; i < b; i++) put(c0 + i, top + r, ln[i], colFor(ln[i]));
   });
 }
+// tonight's real moon: 0 = new, .25 = first quarter (lit on the right), .5 = full, .75 = last quarter
+function moonPhase() {
+  const days = (Date.now() - Date.UTC(2000, 0, 6, 18, 14)) / 864e5;   // a known new moon
+  return frac(days / 29.530588853);
+}
+let moonLight = 1;   // how much of the disc is lit, 0-1, for the glow
 function drawMoon() {
   const asp = cw / chH;
   const mx = cols - Math.max(7, cols * .15), my = Math.max(4, rows * .17), Rm = clamp(rows * .1, 2.5, 6);
   const rx = Math.ceil(Rm * 1.45 / asp), ry = Math.ceil(Rm * 1.45);
   const ramp = ' .:-=+*#%@';
+  const ph = moonPhase(), waxing = ph < .5, cosPh = Math.cos(ph * Math.PI * 2);
+  moonLight = (1 - cosPh) / 2;
   for (let dy = -ry; dy <= ry; dy++) for (let dx = -rx; dx <= rx; dx++) {
     const px = dx * asp / Rm, py = dy / Rm, d2 = px * px + py * py;
     if (d2 > 1) {
@@ -390,6 +426,13 @@ function drawMoon() {
     const nz = Math.sqrt(1 - d2);
     const dot = -.55 * px - .35 * py + .76 * nz;
     const crater = vnoise(px * 3 + 5, py * 3 + 2) > .63 ? .24 : 0;
+    // the shadow line: right of it is lit while waxing, left of it while waning
+    const edge = Math.sqrt(Math.max(0, 1 - py * py)) * cosPh;
+    if (waxing ? px <= edge : px >= -edge) {
+      // the dark part: just a faint dusting of earthshine, so the whole disc is still there
+      if (hash(dx + 90, dy + 90) < .35) put(mx + dx, my + dy, '.', rgbs(mixc(BG, MOON, .07)));
+      continue;
+    }
     const lum = clamp01(dot * .9 - crater + .1);
     const ch = ramp[Math.min(9, (lum * 10) | 0)];
     if (ch !== ' ') put(mx + dx, my + dy, ch, rgbs(mixc(BG, MOON, .16 + .62 * lum)));
@@ -843,6 +886,44 @@ function crumbleLock() {
   lock.state = 'dust';
 }
 
+/* ---------- seasons ----------
+   By the real month, a very sparse fall across the garden: snow in winter, leaves in autumn,
+   petals in spring; summer leaves the air to the fireflies. Each flake fades out on the ground. */
+const SEASONS = {
+  winter: { chars: ".*'", cols: [[214, 220, 232]], density: .1, fall: [.6, 1.2], sway: .5, alpha: .3 },
+  autumn: { chars: ",`'", cols: [[150, 78, 40], [168, 112, 52], [120, 58, 44]], density: .035, fall: [1.4, 2.4], sway: 1.6, alpha: .42 },
+  spring: { chars: "'.`", cols: [[222, 170, 192], [236, 214, 222]], density: .04, fall: [.9, 1.6], sway: 1.1, alpha: .36 },
+};
+function seasonNow() {
+  const m = new Date().getMonth();
+  return m === 11 || m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? null : 'autumn';
+}
+let seasonals = [];
+function updateSeason(dt) {
+  const S = SEASONS[seasonNow()];
+  if (!S) { seasonals = []; return; }
+  const want = Math.round(cols * S.density * (RM ? .5 : 1)), slow = RM ? .6 : 1;
+  if (seasonals.length < want && Math.random() < dt * want * .25)
+    seasonals.push({ x: rand(-4, cols + 4), y: -1, vy: rand(...S.fall) * slow, ph: Math.random() * 6.28,
+      ch: S.chars[(Math.random() * S.chars.length) | 0], col: S.cols[(Math.random() * S.cols.length) | 0], rest: 0 });
+  for (const s of seasonals) {
+    if (s.y < ground) {
+      s.y += s.vy * dt;
+      s.x += (wind * .9 + Math.sin(t * .9 + s.ph) * S.sway) * dt * slow;
+      if (s.y >= ground) s.y = ground - .01;
+    } else s.rest += dt;
+  }
+  seasonals = seasonals.filter(s => s.rest < 4 && s.x > -6 && s.x < cols + 6);
+}
+function drawSeason() {
+  const S = SEASONS[seasonNow()];
+  if (!S) return;
+  for (const s of seasonals) {
+    const fade = 1 - s.rest / 4;
+    putE(s.x, s.y, s.rest > 0 ? '.' : s.ch, rgbs(mixc(BG, s.col, S.alpha * fade)));
+  }
+}
+
 /* ---------- update ---------- */
 function updateGarden(dt) {
   const breeze = (RM ? .3 : 1) * (Math.sin(t * .13) * .6 + Math.sin(t * .37 + 1) * .3);
@@ -878,6 +959,7 @@ function updateGarden(dt) {
     p.life -= dt * .5;
   }
   petals = petals.filter(p => p.life > 0 && p.x > -2 && p.x < cols + 2);
+  updateSeason(dt);
   if (petals.length > 900) petals.splice(0, petals.length - 900);
 
   for (const fl of flies) {
@@ -916,7 +998,7 @@ function updateGarden(dt) {
   const cycle = (t % 9) / 9;
   const pulse = cycle > .7 ? Math.sin((cycle - .7) / .3 * Math.PI) : 0;
   stoneGlow += ((stoneHover ? 1 : pulse * .75) - stoneGlow) * Math.min(1, dt * 4);
-  updateMusicBox(dt);
+  updateMusicBox(dt); updateVisitor(dt);
 }
 
 function updateSky(dt) {
@@ -1038,6 +1120,8 @@ function compose() {
       if (g < .05) continue;
       put(fl.x, fl.y, g > .6 ? '*' : g > .25 ? '+' : '.', rgbs(mixc(BG, GOLD, .25 + .75 * g)));
     }
+    drawSeason();
+    drawVisitor();
     for (const p of petals) {
       const ch = p.y >= ground - .5 ? '.' : (Math.sin(t * 6 + p.ph) > 0 ? p.ch : "'");
       put(p.x, p.y, ch, rgbs(mixc(BG, p.col, Math.min(1, p.life / 2))));
@@ -1060,10 +1144,38 @@ function compose() {
   }
 }
 
+/* the hour, in the colour of the sky: a whisper of tint low on the horizon that follows the viewer's
+   own clock. Each stop is [hour, horizon rgb, strength]; strengths stay tiny on purpose. */
+const SKY_HOURS = [
+  [0, [44, 32, 78], .05],    // midnight: almost nothing
+  [4.5, [70, 92, 124], .10], // before dawn: grey-blue
+  [7, [118, 86, 104], .10],  // first light: ash rose
+  [12, [52, 64, 96], .06],   // midday: still night here, only a little paler
+  [18, [124, 62, 112], .13], // dusk: violet and rose
+  [21, [64, 38, 96], .08],   // late evening
+  [24, [44, 32, 78], .05],
+];
+function skyTint() {
+  const d = new Date(), h = d.getHours() + d.getMinutes() / 60;
+  let i = 0;
+  while (i < SKY_HOURS.length - 2 && SKY_HOURS[i + 1][0] <= h) i++;
+  const [h0, c0, a0] = SKY_HOURS[i], [h1, c1, a1] = SKY_HOURS[i + 1], k = easeInOut(clamp01((h - h0) / (h1 - h0)));
+  return { c: mixc(c0, c1, k), a: a0 + (a1 - a0) * k };
+}
+let tint = skyTint(), tintChecked = 0;
+
 function render() {
   ctx.fillStyle = rgbs(BG); ctx.fillRect(0, 0, W, H);
-  const mg = ctx.createRadialGradient(moonGlow.x, moonGlow.y, 0, moonGlow.x, moonGlow.y, moonGlow.r * 3.2);
-  mg.addColorStop(0, 'rgba(150,120,180,0.13)'); mg.addColorStop(1, 'rgba(150,120,180,0)');
+  if (T - tintChecked > 30) { tint = skyTint(); tintChecked = T; }
+  // the horizon sits at the bottom of the garden; looking up into the sky it has slipped out of view
+  const hy = H * (1 + cam * 1.6), tg = ctx.createLinearGradient(0, 0, 0, hy);
+  const [r, g, b] = tint.c.map(v => v | 0);
+  tg.addColorStop(0, `rgba(${r},${g},${b},0)`); tg.addColorStop(.55, `rgba(${r},${g},${b},${(tint.a * .3).toFixed(3)})`);
+  tg.addColorStop(1, `rgba(${r},${g},${b},${tint.a.toFixed(3)})`);
+  ctx.fillStyle = tg; ctx.fillRect(0, 0, W, H);
+  // the moon's glow grows with how much of it is lit
+  const mg = ctx.createRadialGradient(moonGlow.x, moonGlow.y, 0, moonGlow.x, moonGlow.y, moonGlow.r * (2.4 + moonLight * 1.4));
+  mg.addColorStop(0, `rgba(150,120,180,${(.04 + .13 * moonLight).toFixed(3)})`); mg.addColorStop(1, 'rgba(150,120,180,0)');
   ctx.fillStyle = mg; ctx.fillRect(0, 0, W, H);
   let lastCol = '';
   for (let r = 0; r < rows; r++) {
@@ -1228,6 +1340,7 @@ async function loadStars() {
   for (const row of data) await addRow(row, true);
   starsReady = true;
   buildGroups(); syncOverlay();
+  joinPresence();
   db.channel('stars')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stars' }, ({ new: row }) => {
       addRow(row).then(added => { if (added) buildGroups(); });
@@ -1265,6 +1378,57 @@ async function saveStar(f) {
   return group;
 }
 
+/* ---------- who's here ----------
+   Each unlocked device says once whether it's Alex or Teri. While the page is open it quietly
+   announces that (encrypted, so only an unlocked page can read the name) on a live presence channel;
+   when the other one is here too, a firefly comes to rest on the tombstone. */
+const ME_KEY = 'nightshade-me';
+let me = null;
+try { me = localStorage.getItem(ME_KEY); } catch (e) {}
+if (me !== 'alex' && me !== 'teri') me = null;
+const deviceId = (() => {
+  try {
+    let id = localStorage.getItem('nightshade-device');
+    if (!id) { id = tob64(crypto.getRandomValues(new Uint8Array(9))); localStorage.setItem('nightshade-device', id); }
+    return id;
+  } catch (e) { return Math.random().toString(36).slice(2); }
+})();
+const whoCard = document.getElementById('whoCard');
+const presence = { channel: null, others: new Map() };
+function chooseMe(who) {
+  me = who;
+  try { localStorage.setItem(ME_KEY, who); } catch (e) {}
+  setAuthor(who);   // new stars are signed by whoever this is
+  whoCard.hidden = true;
+  if (presence.channel) trackMe(); else joinPresence();
+}
+whoCard.querySelectorAll('button').forEach(b => b.addEventListener('click', () => chooseMe(b.dataset.me)));
+async function sealText(s) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  return { iv: tob64(iv), ct: tob64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, unlockKey, new TextEncoder().encode(s))) };
+}
+async function openText(iv, ct) {
+  return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(iv) }, unlockKey, unb64(ct)));
+}
+async function trackMe() {
+  if (!presence.channel || !me) return;
+  try { await presence.channel.track(await sealText(me)); } catch (e) {}
+}
+function joinPresence() {
+  if (!db || !unlockKey || !me || presence.channel) return;
+  const ch = db.channel('here', { config: { presence: { key: deviceId } } });
+  ch.on('presence', { event: 'sync' }, async () => {
+    const others = new Map();
+    for (const [key, metas] of Object.entries(ch.presenceState())) {
+      if (key === deviceId || !metas[0]?.iv) continue;
+      try { const who = await openText(metas[0].iv, metas[0].ct); if (who !== me && (who === 'alex' || who === 'teri')) others.set(key, who); } catch (e) {}
+    }
+    presence.others = others;
+  });
+  ch.subscribe(status => { if (status === 'SUBSCRIBED') trackMe(); });
+  presence.channel = ch;
+}
+
 /* ---------- the "Add a star" form ---------- */
 const NEW_THEME = '__new';
 const starBtn = document.getElementById('addStar'), starForm = document.getElementById('starForm');
@@ -1279,7 +1443,7 @@ function setAuthor(by) {
   byBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.by === by)));
   try { localStorage.setItem('nightshade-author', by); } catch (e) {}
 }
-setAuthor(author);
+setAuthor(me || author);   // once a device has said who it is, its stars are signed that way
 byBtns.forEach(b => b.addEventListener('click', () => setAuthor(b.dataset.by)));
 
 const isNotes = id => !!themes.find(t => t.id === id)?.notes;
@@ -1474,6 +1638,9 @@ function syncOverlay() {
   // only offered once the stars table has answered, so a missing table never eats someone's writing
   const canAdd = up && lock.state === 'open' && starsReady;
   if (starBtn.hidden === canAdd) starBtn.hidden = !canAdd;
+  // asked once per device, right after the first unlock
+  const askWho = up && lock.state === 'open' && !!unlockKey && !me && starForm.hidden;
+  if (whoCard.hidden === askWho) whoCard.hidden = !askWho;
   const zg = zoom.id && zoom.p === 1 ? groups.find(g => g.id === zoom.id) : null;
   const canRead = showMem && !!zg && zg.stars.length > 1;
   if (readBtn.hidden === canRead) readBtn.hidden = !canRead;
@@ -1816,6 +1983,57 @@ function updateMusicBox(dt) {
   music.notesUp = music.notesUp.filter(n => t - n.born < 5.5);
   if (music.notesUp.length > 60) music.notesUp.splice(0, music.notesUp.length - 60);
 }
+// the other one's firefly: flies in while they have the page open, rests on top of the tombstone,
+// and lifts away when they leave. Tapping it lets a soft line rise from the stone and fade.
+const visitor = { who: null, x: 0, y: 0, state: 'away' };   // away | arriving | resting | leaving
+let hereMsgs = [];
+const NAMES = { alex: 'Alex', teri: 'Teri' };
+function updateVisitor(dt) {
+  if (!stoneRect) return;
+  const other = presence.others.size ? [...presence.others.values()][0] : null;
+  const px = stoneRect.c0 + 6, py = stoneRect.r0 - 1;
+  if (other && (visitor.state === 'away' || visitor.state === 'leaving')) {
+    if (visitor.state === 'away') { visitor.x = Math.random() < .5 ? -2 : cols + 2; visitor.y = rand(rows * .25, rows * .55); }
+    visitor.state = 'arriving'; visitor.who = other;
+  }
+  if (!other && (visitor.state === 'arriving' || visitor.state === 'resting')) visitor.state = 'leaving';
+  if (visitor.state === 'arriving') {
+    const dx = px - visitor.x, dy = py - visitor.y, d = Math.hypot(dx, dy);
+    const step = Math.min(d, (RM ? 5 : 8) * dt);
+    visitor.x += dx / (d || 1) * step + Math.sin(t * 3.1) * dt * 2.2;
+    visitor.y += dy / (d || 1) * step + Math.cos(t * 2.3) * dt * 1.2;
+    if (d < .35) visitor.state = 'resting';
+  } else if (visitor.state === 'resting') { visitor.x = px; visitor.y = py; }
+  else if (visitor.state === 'leaving') {
+    visitor.y -= 5 * dt; visitor.x += Math.sin(t * 2) * dt * 3;
+    if (visitor.y < -2) visitor.state = 'away';
+  }
+  hereMsgs = hereMsgs.filter(m => t - m.born < 4.5);
+}
+function drawVisitor() {
+  for (const m of hereMsgs) {
+    const age = t - m.born, a = Math.max(0, .85 - age * .19) * Math.min(1, age * 4);
+    for (let i = 0; i < m.text.length; i++)
+      if (m.text[i] !== ' ') put(m.c - m.text.length / 2 + i, m.r - age * .7, m.text[i], rgbs(mixc(BG, MEM, a)));
+  }
+  if (visitor.state === 'away') return;
+  const tintV = visitor.who === 'teri' ? TERI : GOLD, glow = .6 + .4 * Math.sin(t * 2.4);
+  if (visitor.state === 'resting') {
+    putE(visitor.x - 1, visitor.y, '.', rgbs(mixc(BG, tintV, .25 * glow)));
+    putE(visitor.x + 1, visitor.y, '.', rgbs(mixc(BG, tintV, .25 * glow)));
+  }
+  put(visitor.x, visitor.y, glow > .75 ? '*' : '+', rgbs(mixc(BG, tintV, .55 + .4 * glow)));
+}
+function overVisitor(p) {
+  if (visitor.state === 'away' || cam !== 0) return false;
+  const c = (p.x - ox) / cw, r = (p.y - oy) / chH;
+  return Math.abs(c - visitor.x - .5) < 2 && Math.abs(r - visitor.y - .5) < 1.3;
+}
+function greetVisitor() {
+  if (hereMsgs.some(m => t - m.born < 1.5) || !stoneRect) return;
+  hereMsgs.push({ text: `${NAMES[visitor.who] || 'Someone'} is here, too!`, born: t, c: stoneRect.c0 + 6, r: stoneRect.r0 - 2 });
+}
+
 function overBox(p) {
   if (!boxRect || cam !== 0) return false;
   const c = (p.x - ox) / cw, r = (p.y - oy) / chH;
@@ -1838,7 +2056,7 @@ stage.addEventListener('pointermove', e => {
   const p = local(e);
   if (pointer.lastX !== null) gust = clamp(gust + (p.x - pointer.lastX) * (e.buttons ? .02 : .01), -6, 6);
   pointer.lastX = p.x; pointer.x = p.x; pointer.y = p.y; pointer.in = true;
-  const h = overStone(p), hb = overBox(p);
+  const h = overStone(p), hb = overBox(p) || overVisitor(p);
   if (h !== stoneHover || hb !== boxHover) { stoneHover = h; boxHover = hb; updateCursor(); }
 });
 // a sideways swipe while zoomed in moves to the neighbouring constellation
@@ -1868,6 +2086,7 @@ stage.addEventListener('pointerdown', e => {
     const f = flowers[i];
     if (f.R > 1 && f.P && f.P.w === 0 && Math.hypot((cx - f.cx) * asp, (cy - f.cy) / f.S.tilt) < f.R * 1.05) { scatter(f); return; }
   }
+  if (overVisitor(p)) { greetVisitor(); return; }
   if (overBox(p)) { music.playing ? stopMusic() : playMusic(); return; }
   if (overStone(p)) { goSky(); return; }
   plant(clamp(cx / cols, .02, .98), chosen, { depth: 1 });
