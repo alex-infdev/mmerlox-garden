@@ -597,6 +597,7 @@ function drawSky() {
     const lum = .3 + .7 * Math.pow((Math.sin(T * s.sp + s.ph) + 1) / 2, 2);
     put(s.c - bgPan, s.r - rows, s.ch, rgbs(mixc(BG, STAR, (.1 + .4 * lum) * s.b)));
   }
+  drawDeepSky(pan * .35);
   // a faint band of haze winding along the sky
   const bgShift = Math.floor(bgPan);
   for (let sr = 0; sr < rows; sr++) for (let c = 0; c < cols; c++) {
@@ -615,6 +616,81 @@ function drawSky() {
   if (lock.state === 'open') drawConstellations(asp);
   if (lock.state === 'locked' || lock.state === 'checking' || lock.state === 'opening') drawLock();
   if (lock.state === 'dust') drawDust();
+}
+
+/* ---------- deep sky ----------
+   Faint nebulae and distant bodies behind everything, barely there. They only fill empty cells, so
+   every star stays in front, and they drift at a third of the constellations' speed. Positions are
+   in screen widths across (x) and fractions of the sky's height (y). */
+const NEBULAE = [
+  { x: .18, y: .30, rx: .20, ry: .28, col: [118, 64, 150], seed: 3 },   // violet
+  { x: .64, y: .70, rx: .24, ry: .18, col: [132, 38, 58], seed: 11 },   // wine
+  { x: 1.05, y: .26, rx: .18, ry: .22, col: [58, 86, 132], seed: 19 },  // cold blue
+  { x: 1.50, y: .62, rx: .22, ry: .24, col: [104, 52, 128], seed: 27 }, // violet
+];
+const deepC = (x, deepPan) => x * cols - deepPan;
+
+function drawDeepSky(deepPan) {
+  const asp = cw / chH;
+  // nebulae: soft clouds of dust, thickest at the middle, broken up by noise
+  for (const n of NEBULAE) {
+    const cx = deepC(n.x, deepPan), hw = n.rx * cols, cy = n.y * rows, hh = n.ry * rows;
+    if (cx + hw < 0 || cx - hw > cols) continue;
+    for (let sr = Math.max(0, Math.floor(cy - hh)); sr <= Math.min(rows - 1, cy + hh); sr++) {
+      for (let c = Math.max(0, Math.floor(cx - hw)); c <= Math.min(cols - 1, cx + hw); c++) {
+        const dx = (c - cx) / hw, dy = (sr - cy) / hh, d2 = dx * dx + dy * dy;
+        if (d2 > 1) continue;
+        const wc = Math.floor(c + deepPan);   // sample by sky position so the cloud keeps its shape while panning
+        const f = vnoise(wc * .08 + n.seed, sr * .18) * .65 + vnoise(wc * .21 + n.seed * 3, sr * .45) * .35;
+        const v = Math.pow(1 - d2, 1.4) * f;
+        if (v < .2 || hash(wc + n.seed * 101, sr + 7) > v * 1.1) continue;
+        putE(c, sr - rows, v > .5 ? ':' : v > .34 ? "'" : '.', rgbs(mixc(BG, n.col, .05 + .15 * v)));
+      }
+    }
+  }
+  // a ringed planet, lit from the upper left; its ring is an ellipse that passes behind the planet
+  // along the top and in front of it along the bottom
+  {
+    const pc = deepC(.8, deepPan), pr = rows * .2, R = clamp(rows * .07, 2.4, 4.2);
+    const tint = [168, 120, 84], ramp = '.:-=+*', Rr = R * 1.9, flat = .26;
+    for (let dy = -Math.ceil(R); dy <= Math.ceil(R); dy++) for (let dx = -Math.ceil(R / asp); dx <= Math.ceil(R / asp); dx++) {
+      const px = dx * asp / R, py = dy / R, d2 = px * px + py * py;
+      if (d2 > 1) continue;
+      const lum = clamp01(-.55 * px - .45 * py + .7 * Math.sqrt(1 - d2));
+      put(pc + dx, pr + dy - rows, ramp[Math.min(ramp.length - 1, (lum * ramp.length) | 0)], rgbs(mixc(BG, tint, .06 + .14 * lum)));
+    }
+    for (let k = 0; k < 120; k++) {
+      const t = k / 120 * Math.PI * 2, x = Math.cos(t) * Rr, y = Math.sin(t) * Rr * flat;
+      const front = Math.sin(t) > 0, overPlanet = (x / R) ** 2 + (y / R) ** 2 < 1;
+      if (!front && overPlanet) continue;   // that stretch of ring is hidden behind the planet
+      put(pc + x / asp, pr + y - rows, Math.abs(Math.cos(t)) > .93 ? '.' : '-', rgbs(mixc(BG, tint, front ? .13 : .09)));
+    }
+  }
+  // a spiral galaxy, tilted away
+  {
+    const gc = deepC(.22, deepPan), gr = rows * .74, rot = RM ? 0 : T * .01;
+    for (let arm = 0; arm < 2; arm++) for (let k = 0; k < 64; k++) {
+      const t = k / 64 * Math.PI * 2.4, r = .6 + t * .95, a = t + arm * Math.PI + rot;
+      putE(gc + Math.cos(a) * r / asp * .9, gr + Math.sin(a) * r * .38 - rows, k % 3 ? '.' : "'", rgbs(mixc(BG, [150, 140, 190], .05 + .1 * (1 - k / 64))));
+    }
+    put(gc, gr - rows, '*', rgbs(mixc(BG, [200, 190, 220], .2)));
+  }
+  // a small far planet, cold and pale
+  {
+    const pc = deepC(1.22, deepPan), pr = rows * .46, R = clamp(rows * .025, 1, 1.8);
+    for (let dy = -Math.ceil(R); dy <= Math.ceil(R); dy++) for (let dx = -Math.ceil(R / asp); dx <= Math.ceil(R / asp); dx++) {
+      const px = dx * asp / R, py = dy / R;
+      if (px * px + py * py > 1) continue;
+      putE(pc + dx, pr + dy - rows, px < -.2 ? ':' : '.', rgbs(mixc(BG, [96, 128, 140], .1 + (px < -.2 ? .05 : 0))));
+    }
+  }
+  // a comet hanging high up, its tail streaming back
+  {
+    const cc = deepC(.46, deepPan), cr = rows * .12;
+    put(cc, cr - rows, '*', rgbs(mixc(BG, [210, 220, 230], .22)));
+    for (let k = 1; k <= 9; k++)
+      putE(cc - k, cr + Math.round(k * .18) - rows, k < 3 ? '=' : k < 6 ? '-' : '.', rgbs(mixc(BG, [170, 190, 210], .16 * (1 - k / 11))));
+  }
 }
 
 function drawConstellations(asp) {
