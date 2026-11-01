@@ -162,6 +162,7 @@ button:disabled{opacity:.5;cursor:default}
       </div>
     </div>
     <div class="ctl ctl-sky" id="ctlSky" inert>
+      <button id="readBtn" aria-pressed="false" hidden>Read slowly</button>
       <button id="addStar" aria-pressed="false" hidden>Add a star</button>
     </div>
   </footer>
@@ -255,7 +256,7 @@ let flowers = [], petals = [], bats = [], flies = [], stars = [], skyStars = [],
 let wind = 0, gust = 0, fogX = 0, last = performance.now();
 let t = 0;   // garden clock: stops while the garden is out of view
 let T = 0;   // sky clock: always runs
-let meteors = [], nextMeteor = 3;
+let meteors = [], nextMeteor = 3, nextAimed = 3;
 let nextAuto = 2, nextBat = 5, auto = false, chosen = 'random', uid = 0;
 const pointer = { x: -999, y: -999, in: false, lastX: null };
 
@@ -573,6 +574,22 @@ function groupVisibility(g) {
 }
 const spaced = s => s.toUpperCase().split('').join(' ');
 
+/* ---------- days ----------
+   A star whose date is still ahead stays faint until it arrives; on the day itself, and on every
+   anniversary after, it glows gold. "Today" is the viewer's own local date. */
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const isFuture = m => m.sort > todayISO();
+const isAnniversary = m => !isFuture(m) && m.sort.slice(5) === todayISO().slice(5);
+function dayNote(m) {
+  if (isFuture(m)) return 'still to come';
+  if (!isAnniversary(m)) return '';
+  const years = +todayISO().slice(0, 4) - +m.sort.slice(0, 4);
+  return years === 0 ? 'today' : years === 1 ? 'one year ago today' : `${years} years ago today`;
+}
+
 function drawSky() {
   // the far background turns at half the speed of the constellations, for a little depth
   const bgPan = pan * .5;
@@ -617,29 +634,47 @@ function drawConstellations(asp) {
         const u = k / steps;
         if (u > p) break;
         if (u * steps < 1.4 || (1 - u) * steps < 1.4) continue;
-        putE(a.c + dc * u, a.sr + dr * u - rows, '.', rgbs(mixc(BG, MEM, .3 * vis)));
+        // the line out to a star still to come is fainter
+        putE(a.c + dc * u, a.sr + dr * u - rows, '.', rgbs(mixc(BG, MEM, (isFuture(g.stars[i]) ? .13 : .3) * vis)));
       }
     }
     g.stars.forEach((m, i) => {
       const { c, sr } = pos[i], r = sr - rows;
       const lit = m === openStar || m.hover, tint = m.by === 'teri' ? TERI : MEM;
       const pulse = .7 + .3 * Math.sin(T * 1.4 + i * 1.7 + g.stars.length);
-      const col = lit ? GOLD : mixc(BG, tint, (.55 + .45 * pulse) * vis);
-      if (big > .5) {
-        const arm = rgbs(mixc(BG, lit ? GOLD : tint, (.35 + .25 * pulse) * vis));
+      if (isFuture(m) && !lit) {
+        // still to come: a faint point until its day arrives
+        put(c, r, '+', rgbs(mixc(BG, tint, (.2 + .08 * pulse) * vis)));
+        return;
+      }
+      const anniv = isAnniversary(m), gold = lit || anniv;
+      const col = gold ? mixc(BG, GOLD, vis) : mixc(BG, tint, (.55 + .45 * pulse) * vis);
+      if (big > .5 || anniv) {
+        const arm = rgbs(mixc(BG, gold ? GOLD : tint, (gold ? .75 : .35 + .25 * pulse) * vis));
         put(c - 1, r, '-', arm); put(c + 1, r, '-', arm);
         put(c, r - 1, '.', arm); put(c, r + 1, "'", arm);
       }
+      if (anniv) {
+        // its day: a slow breathing halo
+        const hr = 2.2 + (RM ? 0 : Math.sin(T * 1.6) * .6);
+        for (let k = 0; k < 12; k++) {
+          const a = k / 12 * 6.283 + T * (RM ? 0 : .2);
+          putE(c + Math.cos(a) * hr / asp * .55, r + Math.sin(a) * hr * .55, '.', rgbs(mixc(BG, GOLD, .45 * vis)));
+        }
+      }
       put(c, r, '*', rgbs(col));
       sparkle(c, r, T - (m.born ?? -99), tint, asp);
+      sparkle(c, r, T - (m.flare ?? -99), GOLD, asp);   // struck by a shooting star
     });
     // the name: under the constellation in the overview, across the top when zoomed in
     const label = spaced(g.name);
     if (!focused || ze < 1) {
-      const b = overviewBox(g), a = (1 - (focused ? ze : 0)) * vis * (g.hover ? .85 : .45);
+      // a constellation holding a star on its day shows its name in gold
+      const b = overviewBox(g), hot = g.hover || g.stars.some(isAnniversary);
+      const a = (1 - (focused ? ze : 0)) * vis * (hot ? .85 : .45);
       // just under the constellation's lowest star
       const r0 = Math.max(...pos.map(p => p.sr)) + 3;
-      if (a > .03) for (let i = 0; i < label.length; i++) put(b.c - label.length / 2 + i, r0 - rows, label[i], rgbs(mixc(BG, g.hover ? GOLD : MEM, a)));
+      if (a > .03) for (let i = 0; i < label.length; i++) put(b.c - label.length / 2 + i, r0 - rows, label[i], rgbs(mixc(BG, hot ? GOLD : MEM, a)));
     }
     if (focused && ze > 0) {
       const r0 = Math.max(1, rows * .07);
@@ -817,7 +852,29 @@ function updateSky(dt) {
       vx: d * rand(30, 48), vy: rand(5, 10), age: 0, life: rand(.7, 1.1) });
     nextMeteor = RM ? rand(25, 50) : rand(6, 18);
   }
-  for (const m of meteors) { m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt; }
+  // on a star's day, every so often a shooting star runs straight into it
+  // (with reduced motion it still comes, just less often, like the other shooting stars)
+  if (view === 'sky' && camP === 1 && lock.state === 'open') {
+    nextAimed -= dt;
+    if (nextAimed <= 0) {
+      nextAimed = RM ? rand(40, 60) : rand(14, 24);
+      const targets = [];
+      for (const g of groups) {
+        if (groupVisibility(g) < .9) continue;
+        const pos = starPositions(g);
+        g.stars.forEach((m, i) => { if (isAnniversary(m) && pos[i].c > 2 && pos[i].c < cols - 2) targets.push({ m, ...pos[i] }); });
+      }
+      if (targets.length) {
+        const tg = targets[(Math.random() * targets.length) | 0], d = Math.random() < .5 ? 1 : -1;
+        const vx = d * rand(30, 40), vy = rand(5, 8), life = .9;
+        meteors.push({ x: tg.c - vx * life, y: tg.sr - rows - vy * life, vx, vy, age: 0, life, target: tg.m });
+      }
+    }
+  }
+  for (const m of meteors) {
+    m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt;
+    if (m.target && !m.hit && m.age >= m.life) { m.hit = true; m.target.flare = T; }
+  }
   meteors = meteors.filter(m => m.age < m.life + .4);
 
   if (camP < 1) {
@@ -949,7 +1006,7 @@ function render() {
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
   if (view === 'garden') { t += dt; updateGarden(dt); }
-  updateSky(dt); compose(); render(); placeOverlay();
+  updateSky(dt); updateReading(dt); compose(); render(); placeOverlay();
   requestAnimationFrame(frame);
 }
 
@@ -966,7 +1023,7 @@ function panTo(target) {
 function goSky(instant) {
   if (view === 'sky') return;
   view = 'sky'; stoneHover = false;
-  resetReveal(); zoom.id = null; zoom.p = zoom.to = 0; pan = 0; panV = 0; panTarget = null; rebuildSkyButtons();
+  resetReveal(); zoom.id = null; zoom.p = zoom.to = 0; pan = 0; panV = 0; panTarget = null; nextAimed = 3; rebuildSkyButtons();
   pointer.in = false; pointer.lastX = null;
   ctlGarden.inert = true; ctlSky.inert = false;
   try { history.replaceState(null, '', '#sky'); } catch (e) {}
@@ -1196,6 +1253,40 @@ codeInput.addEventListener('input', () => {
   if (lock.code.length === 6) tryCode(lock.code);
 });
 
+/* ---------- reading slowly ----------
+   Inside a constellation, its stars light up one after another in order, each card staying
+   long enough to read before the next. Any tap, Esc, or leaving the constellation stops it. */
+const readBtn = document.getElementById('readBtn');
+const reading = { on: false, g: null, i: -1, t: 0, dur: 0 };
+function startReading() {
+  const g = groups.find(x => x.id === zoom.id);
+  if (!g) return;
+  Object.assign(reading, { on: true, g, i: -1 });
+  readBtn.setAttribute('aria-pressed', 'true'); readBtn.textContent = 'Stop reading';
+  nextRead();
+}
+function nextRead() {
+  reading.i++;
+  if (reading.i >= reading.g.stars.length) { stopReading(); return; }
+  const m = reading.g.stars[reading.i];
+  reading.t = 0;
+  reading.dur = clamp(4 + (m.title.length + m.note.length) * .05, 5, 22);
+  openCard(m);
+}
+function stopReading() {
+  if (!reading.on) return;
+  reading.on = false;
+  readBtn.setAttribute('aria-pressed', 'false'); readBtn.textContent = 'Read slowly';
+  closeCard();
+}
+function updateReading(dt) {
+  if (!reading.on) return;
+  if (view !== 'sky' || zoom.id !== reading.g.id || zoom.p !== 1) { stopReading(); return; }
+  reading.t += dt;
+  if (reading.t >= reading.dur) nextRead();
+}
+readBtn.addEventListener('click', () => reading.on ? stopReading() : startReading());
+
 /* ---------- moving between constellations ---------- */
 function zoomTo(id) {
   const target = groups.find(g => g.id === id);
@@ -1274,7 +1365,7 @@ function rebuildSkyButtons() {
       const b = document.createElement('button');
       b.className = 'mem';
       b.setAttribute('aria-label', `${m.date}: ${m.title || m.note.replace(/\s+/g, ' ').slice(0, 40)}`);
-      b.addEventListener('click', e => { e.stopPropagation(); openStar === m ? closeCard() : openCard(m); });
+      b.addEventListener('click', e => { e.stopPropagation(); stopReading(); openStar === m ? closeCard() : openCard(m); });
       b.addEventListener('pointerenter', () => { m.hover = true; });
       b.addEventListener('pointerleave', () => { m.hover = false; });
       memLayer.appendChild(b);
@@ -1305,6 +1396,9 @@ function syncOverlay() {
   // only offered once the stars table has answered, so a missing table never eats someone's writing
   const canAdd = up && lock.state === 'open' && starsReady;
   if (starBtn.hidden === canAdd) starBtn.hidden = !canAdd;
+  const zg = zoom.id && zoom.p === 1 ? groups.find(g => g.id === zoom.id) : null;
+  const canRead = showMem && !!zg && zg.stars.length > 1;
+  if (readBtn.hidden === canRead) readBtn.hidden = !canRead;
   // zoomed in: arrows step between constellations; overview: they show there is more sky that way
   const zoomed = !!zoom.id && zoom.p === 1;
   const showPrev = showMem && (zoomed ? groups.length > 1 : !zoom.id && pan > .5);
@@ -1363,7 +1457,11 @@ function placeNear(el, sx, sy) {
 function openCard(m) {
   if (view !== 'sky') return;
   openStar = m;
-  document.getElementById('cardDate').textContent = m.by && m.id !== undefined ? `${m.date} · ${m.by === 'teri' ? 'Teri' : 'Alex'}` : m.date;
+  const parts = [m.date];
+  if (m.by && m.id !== undefined) parts.push(m.by === 'teri' ? 'Teri' : 'Alex');
+  if (dayNote(m)) parts.push(dayNote(m));
+  document.getElementById('cardDate').textContent = parts.join(' · ');
+  if (reading.on && !RM) card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 700, easing: 'ease-out' });
   const title = document.getElementById('cardTitle');
   title.textContent = m.title; title.hidden = !m.title;
   document.getElementById('cardNote').textContent = m.note;
@@ -1433,7 +1531,7 @@ stage.addEventListener('pointerdown', e => {
   if (view === 'sky') {
     if (!starForm.hidden) return;   // don't lose a half-written star to a stray tap
     swipe = { x: p.x, y: p.y, t: performance.now() };
-    closeCard();
+    stopReading(); closeCard();
     return;
   }
 
@@ -1496,7 +1594,8 @@ addEventListener('keydown', e => {
   // typing a digit at the lock goes into the code even if the box lost focus
   if (view === 'sky' && lock.state === 'locked' && !codeInput.hidden && /^[0-9]$/.test(k)) { codeInput.focus({ preventScroll: true }); return; }
   if (k === 'escape') {
-    if (!starForm.hidden) closeStarForm();
+    if (reading.on) stopReading();
+    else if (!starForm.hidden) closeStarForm();
     else if (!card.hidden) closeCard(true);
     else if (zoom.id) zoomOut();
     else goGarden();
