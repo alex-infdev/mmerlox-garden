@@ -2018,12 +2018,17 @@ async function connect() {
 }
 
 /* ---------- the music box ----------
-   A small box by the tombstone. Tapping it opens the lid and plays musicbox.mid, rearranged for a
-   music box: the highest single-voice line becomes the tune (an octave up), any other part fills the
-   tune's silences, the lowest part becomes a soft note per beat two octaves up, and drums are dropped.
-   Every note is a synthesised metal tine, about 15% slower than written, through a generated reverb. */
-const MUSIC_FILE = 'musicbox.mid', SLOWER = 1 / .85;
-const music = { song: null, loading: false, ctx: null, master: null, playing: false, timer: 0, t0: 0, next: 0, end: 0, notesUp: [], pending: [], spin: 0 };
+   A small box by the tombstone. Each time its lid opens it plays the next of its songs in turn,
+   rearranged for a music box: the highest single-voice line becomes the tune (an octave up, at most three
+   notes struck at once), any other part fills the tune's silences, the lowest part becomes a soft note per
+   beat two octaves up, and drums are dropped. Every note is a synthesised metal tine, about 15% slower
+   than written, through a generated reverb.
+   A song with `bpm` plays at exactly that tempo instead (no extra slowing): the second one, Andante, at 65. */
+const SONGS = [{ file: 'musicbox.mid' }, { file: 'musicbox-2.mid', bpm: 65 }];
+const SLOWER = 1 / .85, NEXT_SONG_KEY = 'nightshade-next-song';
+const music = { songs: {}, loading: false, ctx: null, master: null, playing: false, timer: 0, t0: 0, next: 0, end: 0, notesUp: [], pending: [], spin: 0 };
+let nextSong = 0;
+try { nextSong = (+localStorage.getItem(NEXT_SONG_KEY) || 0) % SONGS.length; } catch (e) {}
 
 function parseMidi(buf) {
   const u8 = new Uint8Array(buf);
@@ -2063,7 +2068,7 @@ function parseMidi(buf) {
 }
 
 // turn the band arrangement into a music-box one: [{ time (s), midi, vel, part }]
-function arrange(m) {
+function arrange(m, bpm) {
   const div = m.div, tempos = m.tempos.length ? m.tempos : [{ tick: 0, us: 500000 }];
   const secs = tick => {   // ticks to seconds through any tempo changes
     let s = 0, last = 0, us = tempos[0].us;
@@ -2079,7 +2084,11 @@ function arrange(m) {
   const octaveTo = (ns, target) => 12 * Math.round((target - mean(ns)) / 12);
   const out = [];
   const leadShift = octaveTo(leadPart, 79);
-  for (const n of leadPart) out.push({ tick: n.t0, midi: n.n + leadShift, vel: .9, part: 'lead' });
+  // a music box can't strike a whole cluster: of any notes struck together, keep the top three
+  const byStrike = new Map();
+  for (const n of leadPart) byStrike.set(n.t0, [...(byStrike.get(n.t0) || []), n]);
+  for (const notes of byStrike.values())
+    for (const n of notes.sort((a, b) => b.n - a.n).slice(0, 3)) out.push({ tick: n.t0, midi: n.n + leadShift, vel: .9, part: 'lead' });
   // fill: where the tune is silent for more than two beats, the top note of the other parts carries on
   const leadTicks = leadPart.map(n => [n.t0, n.t1]).sort((a, b) => a[0] - b[0]);
   const silent = tick => !leadTicks.some(([a, b]) => tick >= a - div * 2 && tick <= b + div * 2);
@@ -2106,7 +2115,8 @@ function arrange(m) {
   // slower overall, and winding down over the last eight beats like a spring running out
   const endTick = out[out.length - 1].tick, windFrom = endTick - div * 8;
   return out.map(n => {
-    let s = secs(n.tick) * SLOWER;
+    // either a fixed tempo for this song, or the file's own tempo slowed a little
+    let s = bpm ? secs(n.tick) * (60e6 / tempos[0].us) / bpm : secs(n.tick) * SLOWER;
     if (n.tick > windFrom) { const k = (n.tick - windFrom) / (div * 8); s += k * k * 1.6; }
     return { time: s, midi: clamp(n.midi, 48, 96), vel: n.vel, part: n.part };
   });
@@ -2143,18 +2153,18 @@ function tine(ac, out, when, midi, vel) {
   }
 }
 
-async function loadSong() {
-  if (music.song || music.loading) return music.song;
+async function loadSong(s) {
+  if (music.songs[s.file]) return music.songs[s.file];
   music.loading = true;
   try {
-    const res = await fetch(MUSIC_FILE);
+    const res = await fetch(s.file);
     if (!res.ok) throw new Error(res.status);
-    music.song = arrange(parseMidi(await res.arrayBuffer()));
+    music.songs[s.file] = arrange(parseMidi(await res.arrayBuffer()), s.bpm);
   } catch (e) {
     toast("The music box couldn't find its song");
   }
   music.loading = false;
-  return music.song;
+  return music.songs[s.file];
 }
 
 async function playMusic() {
@@ -2164,7 +2174,11 @@ async function playMusic() {
   music.ctx = music.ctx || new AC();   // created inside the tap, so browsers allow the sound
   await music.ctx.resume();
   music.playing = true;   // the lid opens straight away, even while the song is still loading
-  const song = await loadSong();
+  // the songs take turns, and this device remembers whose turn is next
+  const pick = SONGS[nextSong];
+  nextSong = (nextSong + 1) % SONGS.length;
+  try { localStorage.setItem(NEXT_SONG_KEY, String(nextSong)); } catch (e) {}
+  const song = await loadSong(pick);
   if (!song || !song.length || !music.playing) { music.playing = false; return; }
   const ac = music.ctx;
   const master = ac.createGain(), dry = ac.createGain(), wet = ac.createGain(), verb = makeReverb(ac);

@@ -2,8 +2,8 @@
 // The page itself is fetched fresh whenever possible (so updates show at once) and falls back to the copy;
 // everything else (song, icons, fonts, the database library) is served from the copy and refreshed behind it.
 // Live data (stars, presence) never goes through here.
-const CACHE = 'nightshade-v1';
-const CORE = ['./', 'index.html', 'musicbox.mid', 'manifest.webmanifest',
+const CACHE = 'nightshade-v2';
+const CORE = ['./', 'index.html', 'musicbox.mid', 'musicbox-2.mid', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
