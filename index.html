@@ -88,6 +88,11 @@ button[aria-pressed="true"]{background:var(--blood-dim);border-color:var(--blood
 .card-title{margin:0 0 6px;font-weight:400;font-size:19px;line-height:1.2;color:var(--bone);text-wrap:balance}
 .card-note{margin:0;font-size:15px;line-height:1.45;color:var(--ash);white-space:pre-line}
 .card{max-height:calc(100% - 16px);overflow:auto}
+.card-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:10px}
+.card-ask{font-size:14px;color:var(--ash);margin-right:auto}
+button.link{background:transparent;border:0;padding:2px 0;font-size:13px;color:var(--ash);text-decoration:underline;text-underline-offset:3px}
+button.link:hover{border:0;color:var(--bone)}
+button.link.danger{color:#c4566c}
 .whocard{width:auto;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
 .whocard .seg{justify-content:center;margin-top:8px}
 .starform{width:min(300px,calc(100% - 16px));max-height:calc(100% - 16px);overflow:auto}
@@ -140,6 +145,15 @@ button:disabled{opacity:.5;cursor:default}
       <p class="card-date" id="cardDate"></p>
       <h2 class="card-title" id="cardTitle"></h2>
       <p class="card-note" id="cardNote"></p>
+      <div class="card-actions" id="cardActions" hidden>
+        <button type="button" class="link" id="cardEdit">Edit</button>
+        <button type="button" class="link" id="cardDelete">Delete</button>
+      </div>
+      <div class="card-actions" id="cardConfirm" hidden>
+        <span class="card-ask">Delete this star?</span>
+        <button type="button" class="link danger" id="cardYes">Delete</button>
+        <button type="button" class="link" id="cardNo">Keep</button>
+      </div>
     </div>
     <form class="card starform" id="starForm" autocomplete="off" hidden>
       <p class="card-date">A new star</p>
@@ -183,6 +197,7 @@ button:disabled{opacity:.5;cursor:default}
         <button id="sp-thistle" data-sp="thistle" aria-pressed="false" title="Key 5"><span class="sw" style="--c:#b45ab4"></span>Thistle</button>
       </div>
       <div class="group">
+        <button class="sendStar" hidden>Send a shooting star</button>
         <button id="gust" title="Space">Gust</button>
         <button id="scatter" title="Key S">Scatter all</button>
         <button id="auto" aria-pressed="false" title="Key A">Self-seeding</button>
@@ -190,8 +205,10 @@ button:disabled{opacity:.5;cursor:default}
       </div>
     </div>
     <div class="ctl ctl-sky" id="ctlSky" inert>
+      <button class="sendStar" hidden>Send a shooting star</button>
       <button id="readBtn" aria-pressed="false" hidden>Read slowly</button>
       <button id="addStar" aria-pressed="false" hidden>Add a star</button>
+      <button id="backupBtn" hidden>Back up</button>
     </div>
   </footer>
 </div>
@@ -886,6 +903,16 @@ function crumbleLock() {
   lock.state = 'dust';
 }
 
+/* ---------- days together ----------
+   Counted from 21 June 2026 by the viewer's own calendar. Every hundredth day and every full year
+   the stone glows on its own and shows the count without being asked. */
+function daysTogether() {
+  const n = new Date();
+  return Math.floor((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - Date.UTC(2026, 5, 21)) / 864e5);
+}
+const isRoundDay = d => d > 0 && (d % 100 === 0 || d % 365 === 0);
+let daysAlpha = 0, stoneHold = null, stonePress = null;
+
 /* ---------- seasons ----------
    By the real month, a very sparse fall across the garden: snow in winter, leaves in autumn,
    petals in spring; summer leaves the air to the fireflies. Each flake fades out on the ground. */
@@ -997,7 +1024,10 @@ function updateGarden(dt) {
   // the stone glows faintly every so often, and brightens under the cursor
   const cycle = (t % 9) / 9;
   const pulse = cycle > .7 ? Math.sin((cycle - .7) / .3 * Math.PI) : 0;
-  stoneGlow += ((stoneHover ? 1 : pulse * .75) - stoneGlow) * Math.min(1, dt * 4);
+  const special = isRoundDay(daysTogether());
+  stoneGlow += ((stoneHover ? 1 : special ? .7 + pulse * .3 : pulse * .75) - stoneGlow) * Math.min(1, dt * 4);
+  const showDays = stoneHover || special || (stoneHold != null && T - stoneHold < 3);
+  daysAlpha += ((showDays ? .7 : 0) - daysAlpha) * Math.min(1, dt * 2.5);
   updateMusicBox(dt); updateVisitor(dt);
 }
 
@@ -1033,8 +1063,9 @@ function updateSky(dt) {
   for (const m of meteors) {
     m.age += dt; m.x += m.vx * dt; m.y += m.vy * dt;
     if (m.target && !m.hit && m.age >= m.life) { m.hit = true; m.target.flare = T; }
+    if (m.label && !m.end && m.age >= m.life * .7) m.end = { x: m.x, y: m.y };   // where its "from …" stays
   }
-  meteors = meteors.filter(m => m.age < m.life + .4);
+  meteors = meteors.filter(m => m.age < m.life + (m.label ? 3.4 : .4));
 
   if (camP < 1) {
     camP = Math.min(1, camP + dt / CAM_DUR);
@@ -1094,7 +1125,13 @@ function compose() {
     const L = 18;
     for (let k = head ? 0 : 4; k <= L; k++) {
       const s = k * .026, ch = k === 0 ? '*' : k === 1 ? '+' : k > L - 3 ? '.' : body;
-      put(m.x - m.vx * s, m.y - m.vy * s, ch, rgbs(mixc(BG, MOON, fade * (1 - k / (L + 1)))));
+      // a sent star streaks in the sender's colour
+      const col = m.from ? (m.from === 'teri' ? TERI : GOLD) : MOON;
+      put(m.x - m.vx * s, m.y - m.vy * s, ch, rgbs(mixc(BG, col, fade * (1 - k / (L + 1)))));
+    }
+    if (m.label && m.end) {
+      const txt = `from ${NAMES[m.from] || ''}`, a = clamp01((m.age - m.life * .7) * 2) * clamp01((m.life + 3.4 - m.age) / 1.6) * .6;
+      for (let i = 0; i < txt.length; i++) if (txt[i] !== ' ') put(m.end.x - txt.length / 2 + i, m.end.y + 1.5, txt[i], rgbs(mixc(BG, MEM, a)));
     }
   }
   moonGlow = drawMoon();
@@ -1109,6 +1146,11 @@ function compose() {
     stoneRect = { c0, c1: c0 + TOMBSTONE[0].length, r0: ground - TOMBSTONE.length, r1: ground - 1 };
     const sc = rgbs(mixc(STONE, [104, 94, 108], stoneGlow * .6)), tc = rgbs(mixc(STONE_TXT, MEM, stoneGlow));
     drawSprite(TOMBSTONE, c0, ground - 1, ch => /[A-Z&]/.test(ch) ? tc : sc);
+    // the days together, surfacing in the stone's blank line like an inscription
+    if (daysAlpha > .02) {
+      const txt = `${daysTogether()} days`, row = stoneRect.r0 + 5;
+      for (let i = 0; i < txt.length; i++) if (txt[i] !== ' ') put(c0 + 1 + Math.floor((10 - txt.length) / 2) + i, row, txt[i], rgbs(mixc(STONE, MEM, daysAlpha)));
+    }
     drawMusicBox();
     for (const tf of tufts) {
       const w = wind + Math.sin(t * 1.3 + tf.c * .3) * .6;
@@ -1264,7 +1306,8 @@ async function tryCode(code) {
       base, { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     const sealed = await openSeal(key);
     // remember the derived key (not the code) so this device opens straight away next time
-    try { localStorage.setItem(KEY_STORE, JSON.stringify({ salt: SEALED.salt, k: tob64(await crypto.subtle.exportKey('raw', key)) })); } catch (e) {}
+    unlockRaw = new Uint8Array(await crypto.subtle.exportKey('raw', key));
+    try { localStorage.setItem(KEY_STORE, JSON.stringify({ salt: SEALED.salt, k: tob64(unlockRaw) })); } catch (e) {}
     unlockKey = key; useSealed(sealed);
     loadStars();
     codeInput.blur();
@@ -1280,7 +1323,7 @@ async function restoreUnlock() {
     if (!saved || saved.salt !== SEALED.salt) return;
     const key = await crypto.subtle.importKey('raw', unb64(saved.k), 'AES-GCM', false, ['encrypt', 'decrypt']);
     useSealed(await openSeal(key));
-    unlockKey = key;
+    unlockKey = key; unlockRaw = unb64(saved.k);
     lock.state = 'open';
     loadStars();
   } catch (e) {
@@ -1290,11 +1333,17 @@ async function restoreUnlock() {
 /* ---------- stars and constellations added from the sky ----------
    Each row is encrypted with the unlock key before it leaves the browser: either a star
    ({kind:'star', group, sort, title, note, by}) or a new constellation ({kind:'theme', id, name}).
-   Rows that don't open with this key (junk, or written under another passcode) are skipped. */
-let unlockKey = null, starsLoaded = false, starsReady = false;
+   Rows that don't open with this key (junk, or written under another passcode) are skipped.
+   Every row also carries a random nonce and the hash of an edit token derived from the key and that
+   nonce, so only someone with the code can edit or delete it (supabase/stars-edit.sql checks the hash).
+   The rows (still encrypted) are cached on the device, and stars written offline wait in an outbox. */
+let unlockKey = null, unlockRaw = null, hmacKey = null, starsLoaded = false, starsReady = false;
 const starIds = new Set();
+const ROWS_KEY = 'nightshade-rows', OUTBOX_KEY = 'nightshade-outbox';
 const fmtDate = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 const str = (v, n) => typeof v === 'string' ? v.slice(0, n) : '';
+const loadJSON = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? d; } catch (e) { return d; } };
+const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 function cleanStar(s) {
   if (!s || typeof s !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(s.sort) || !str(s.group, 40)) return null;
   return { group: str(s.group, 40), sort: s.sort, date: fmtDate(s.sort), title: str(s.title, 60), note: str(s.note, 600), by: s.by === 'teri' ? 'teri' : 'alex' };
@@ -1310,72 +1359,192 @@ function useSealed(sealed) {
   sealedList = (data.memories || []).map(m => ({ ...m, group: m.group || 'memories' }));
   buildGroups();
 }
+async function editToken(nonce) {
+  hmacKey = hmacKey || await crypto.subtle.importKey('raw', unlockRaw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return tob64(await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode('edit:' + nonce)));
+}
+async function sha256hex(s) {
+  const b = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
+  return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+async function openRow(row) {
+  const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(row.iv) }, unlockKey, unb64(row.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
 async function addRow(row, quiet) {
-  if (starIds.has(row.id)) return false;
+  if (row.id != null && starIds.has(row.id)) return false;
   const mine = liveStars.find(s => s.id == null && s.ct === row.ct);   // our own save echoing back
-  if (mine) { mine.id = row.id; starIds.add(row.id); return false; }
+  if (mine) { if (row.id != null) { mine.id = row.id; starIds.add(row.id); } return false; }
   try {
-    const pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(row.iv) }, unlockKey, unb64(row.ct));
-    const d = JSON.parse(new TextDecoder().decode(pt));
-    if (starIds.has(row.id)) return false;
+    const d = await openRow(row);
+    if (row.id != null && starIds.has(row.id)) return false;
     if (d.kind === 'theme') {
       const t = cleanTheme(d);
       if (!t || themes.some(x => x.id === t.id)) return false;
-      starIds.add(row.id); themes.push(t);
+      if (row.id != null) starIds.add(row.id);
+      themes.push(t);
       return true;
     }
     const s = cleanStar(d);
     if (!s) return false;
-    starIds.add(row.id);
-    liveStars.push({ ...s, id: row.id, ct: row.ct, born: quiet ? -99 : T });
+    if (row.id != null) starIds.add(row.id);
+    liveStars.push({ ...s, id: row.id ?? null, ct: row.ct, nonce: row.nonce || null, born: quiet ? -99 : T });
     return true;
   } catch (e) { return false; }
 }
+// someone edited a star: swap in the new words, keep its place
+async function changeRow(row) {
+  const s = liveStars.find(x => x.id === row.id);
+  if (!s) return addRow(row).then(a => { if (a) buildGroups(); });
+  try {
+    const c = cleanStar(await openRow(row));
+    if (!c) return;
+    Object.assign(s, c, { ct: row.ct, nonce: row.nonce || s.nonce });
+    buildGroups();
+    if (openStar === s) openCard(s);
+  } catch (e) {}
+}
+function dropRow(id) {
+  const i = liveStars.findIndex(x => x.id === id);
+  if (i < 0) return;
+  if (openStar === liveStars[i]) closeCard();
+  liveStars.splice(i, 1); starIds.delete(id);
+  buildGroups();
+}
+// fetch everything, or fall back to the copy kept on this device when there's no connection
+async function fetchRows() {
+  if (!db) return null;
+  try {
+    const { data, error } = await db.from('stars').select('id,iv,ct,nonce').order('id').limit(1000);
+    if (error) {
+      // before supabase/stars-edit.sql has been run there is no nonce column yet
+      const plain = await db.from('stars').select('id,iv,ct').order('id').limit(1000);
+      if (plain.error) return null;
+      return plain.data;
+    }
+    return data;
+  } catch (e) { return null; }
+}
 async function loadStars() {
   syncOverlay();
-  if (starsLoaded || !db || !unlockKey) return;
+  if (starsLoaded || !unlockKey) return;
   starsLoaded = true;
-  const { data, error } = await db.from('stars').select('id,iv,ct').order('id').limit(1000);
-  if (error) { starsLoaded = false; return; }
-  for (const row of data) await addRow(row, true);
+  let rows = await fetchRows();
+  if (rows) saveJSON(ROWS_KEY, rows);
+  else rows = loadJSON(ROWS_KEY, []);
+  for (const row of rows) await addRow(row, true);
+  for (const item of loadJSON(OUTBOX_KEY, [])) await addRow({ ...item, id: null }, true);   // written offline earlier
   starsReady = true;
   buildGroups(); syncOverlay();
+  goLive();
+}
+// once there's both an unlocked key and a connection: presence, the outbox, and live changes
+let live = false;
+function goLive() {
+  if (live || !db || !starsReady) return;
+  live = true;
   joinPresence();
+  resync();
   db.channel('stars')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'stars' }, ({ new: row }) => {
       addRow(row).then(added => { if (added) buildGroups(); });
     })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'stars' }, ({ new: row }) => changeRow(row))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'stars' }, ({ old }) => dropRow(old.id))
     .subscribe();
 }
-async function insertSealed(obj) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
+// back online: send anything waiting, and catch up on what changed meanwhile
+async function resync() {
+  if (!db || !unlockKey || !starsReady) return;
+  await flushOutbox();
+  const rows = await fetchRows();
+  if (!rows) return;
+  saveJSON(ROWS_KEY, rows);
+  const ids = new Set(rows.map(r => r.id));
+  for (const s of [...liveStars]) if (s.id != null && !ids.has(s.id)) dropRow(s.id);
+  for (const row of rows) {
+    const s = liveStars.find(x => x.id === row.id);
+    if (!s) await addRow(row, true);
+    else if (s.ct !== row.ct) await changeRow(row);
+  }
+  buildGroups();
+}
+addEventListener('online', resync);
+
+// a new encrypted row: { iv, ct, nonce, edit_hash }
+async function sealRow(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12)), nonce = tob64(crypto.getRandomValues(new Uint8Array(12)));
   const ct = tob64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, unlockKey, new TextEncoder().encode(JSON.stringify(obj))));
-  return { ct, send: () => db.from('stars').insert({ iv: tob64(iv), ct }).select('id').single() };
+  return { iv: tob64(iv), ct, nonce, edit_hash: await sha256hex(await editToken(nonce)) };
+}
+async function insertRow(row) {
+  let res = await db.from('stars').insert(row).select('id').single();
+  // the edit columns don't exist until supabase/stars-edit.sql has been run: save without them
+  if (res.error && /nonce|edit_hash|column/i.test(res.error.message || '')) {
+    res = await db.from('stars').insert({ iv: row.iv, ct: row.ct }).select('id').single();
+  }
+  return res;
+}
+let flushing = false;
+async function flushOutbox() {
+  if (flushing || !db) return;
+  flushing = true;
+  try {
+    let box = loadJSON(OUTBOX_KEY, []);
+    while (box.length) {
+      const item = box[0];
+      let res;
+      try { res = await insertRow(item); } catch (e) { break; }
+      if (res.error) break;   // offline or busy: try again later
+      const local = liveStars.find(s => s.id == null && s.ct === item.ct);
+      if (local) { local.id = res.data.id; starIds.add(res.data.id); }
+      else starIds.add(res.data.id);
+      box = box.slice(1); saveJSON(OUTBOX_KEY, box);
+    }
+  } finally { flushing = false; }
+}
+async function queueRow(row) {
+  saveJSON(OUTBOX_KEY, [...loadJSON(OUTBOX_KEY, []), row]);
+  await flushOutbox();
+  return !loadJSON(OUTBOX_KEY, []).some(r => r.ct === row.ct);   // true once it actually left
 }
 async function saveStar(f) {
   let group = f.group;
   if (group === NEW_THEME) {
     const t = cleanTheme({ id: 'c' + tob64(crypto.getRandomValues(new Uint8Array(6))).replace(/[^a-z0-9]/gi, ''), name: f.newName });
     if (!t) return false;
-    const row = await insertSealed({ kind: 'theme', ...t });
-    const { data, error } = await row.send();
-    if (error) { toast("Couldn't create the constellation. Try again in a minute."); return false; }
-    starIds.add(data.id); themes.push(t); group = t.id;
+    themes.push(t); group = t.id;
+    await queueRow(await sealRow({ kind: 'theme', ...t }));
   }
   const s = cleanStar({ ...f, group });
   if (!s) return false;
-  const row = await insertSealed({ kind: 'star', ...s });
-  const local = { ...s, id: null, ct: row.ct, born: T };
-  liveStars.push(local); buildGroups();
-  const { data, error } = await row.send();
-  if (error) {
-    liveStars.splice(liveStars.indexOf(local), 1); buildGroups();
-    toast("Couldn't save the star. Try again in a minute.");
-    return false;
-  }
-  if (local.id == null) { local.id = data.id; starIds.add(data.id); }
-  toast('Star added');
+  const row = await sealRow({ kind: 'star', ...s });
+  liveStars.push({ ...s, id: null, ct: row.ct, nonce: row.nonce, born: T });
+  buildGroups();
+  const sent = await queueRow(row);
+  toast(sent ? 'Star added' : "Star saved here. It'll send itself when you're back online.");
   return group;
+}
+async function updateStar(star, f) {
+  if (!db || star.id == null || !star.nonce) { toast("This star can't be changed from here yet"); return false; }
+  const s = cleanStar({ ...f, group: f.group });
+  if (!s) return false;
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = tob64(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, unlockKey, new TextEncoder().encode(JSON.stringify({ kind: 'star', ...s }))));
+  const { data, error } = await db.rpc('update_star', { p_id: star.id, p_token: await editToken(star.nonce), p_iv: tob64(iv), p_ct: ct });
+  if (error || !data) { toast("Couldn't change the star. Check your connection and try again."); return false; }
+  Object.assign(star, s, { ct });
+  buildGroups();
+  toast('Star changed');
+  return s.group;
+}
+async function deleteStar(star) {
+  if (!db || star.id == null || !star.nonce) { toast("This star can't be removed from here yet"); return false; }
+  const { data, error } = await db.rpc('delete_star', { p_id: star.id, p_token: await editToken(star.nonce) });
+  if (error || !data) { toast("Couldn't remove the star. Check your connection and try again."); return false; }
+  dropRow(star.id);
+  toast('Star removed');
+  return true;
 }
 
 /* ---------- who's here ----------
@@ -1425,8 +1594,62 @@ function joinPresence() {
     }
     presence.others = others;
   });
+  // little signals between the two of you, also sealed: a shooting star sent across, a blink of a firefly
+  ch.on('broadcast', { event: 'star' }, async ({ payload }) => {
+    try { const who = await openText(payload.iv, payload.ct); if (who !== me) receiveShootingStar(who); } catch (e) {}
+  });
+  ch.on('broadcast', { event: 'blink' }, async ({ payload }) => {
+    try { const who = await openText(payload.iv, payload.ct); if (visitor.who === who) visitor.blink = t; } catch (e) {}
+  });
   ch.subscribe(status => { if (status === 'SUBSCRIBED') trackMe(); });
   presence.channel = ch;
+}
+async function signal(event) {
+  if (!presence.channel || !me) return false;
+  try { await presence.channel.send({ type: 'broadcast', event, payload: await sealText(me) }); return true; } catch (e) { return false; }
+}
+
+/* ---------- a shooting star, sent ----------
+   While the other one is here, either of you can send a shooting star across the other's sky:
+   it streaks in their colour and leaves a faint "from Alex" behind it as it fades. */
+let lastSent = -99;
+async function sendShootingStar() {
+  if (T - lastSent < 3 || !presence.others.size) return;
+  lastSent = T;
+  if (await signal('star')) { launchStar(me, false); toast('Shooting star sent'); }
+}
+function receiveShootingStar(who) { launchStar(who, true); chime(84); }
+function launchStar(who, labelled) {
+  const d = Math.random() < .5 ? 1 : -1;
+  const top = view === 'sky' ? -rows : 0;   // world rows: whichever sky is in view
+  meteors.push({ x: d > 0 ? rand(cols * .05, cols * .35) : rand(cols * .65, cols * .95), y: top + rand(2, rows * (view === 'sky' ? .4 : .2)),
+    vx: d * rand(26, 34), vy: rand(4, 7), age: 0, life: 1.6, from: who, label: labelled });
+}
+document.querySelectorAll('.sendStar').forEach(b => b.addEventListener('click', sendShootingStar));
+
+/* ---------- a soft chime ----------
+   One music-box note, used when the other one's firefly lands or their shooting star arrives.
+   Browsers only allow sound after a tap, so the first tap anywhere quietly readies it. */
+let chimeOut = null;
+function readyAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  music.ctx = music.ctx || new AC();
+  if (music.ctx.state === 'suspended') music.ctx.resume();
+}
+addEventListener('pointerdown', readyAudio, { capture: true });
+addEventListener('keydown', readyAudio, { capture: true });
+function chime(midi) {
+  const ac = music.ctx;
+  if (!ac || ac.state !== 'running') return;
+  if (!chimeOut) {
+    const g = ac.createGain(), wet = ac.createGain(), verb = makeReverb(ac);
+    g.gain.value = .55; wet.gain.value = .35;
+    g.connect(ac.destination); g.connect(verb); verb.connect(wet); wet.connect(ac.destination);
+    chimeOut = g;
+  }
+  tine(ac, chimeOut, ac.currentTime + .02, midi, .8);
+  try { navigator.vibrate?.(25); } catch (e) {}
 }
 
 /* ---------- the "Add a star" form ---------- */
@@ -1444,7 +1667,12 @@ function setAuthor(by) {
   try { localStorage.setItem('nightshade-author', by); } catch (e) {}
 }
 setAuthor(me || author);   // once a device has said who it is, its stars are signed that way
-byBtns.forEach(b => b.addEventListener('click', () => setAuthor(b.dataset.by)));
+let formBy = author;   // who the star in the form is from (editing keeps the original author unless changed)
+byBtns.forEach(b => b.addEventListener('click', () => {
+  formBy = b.dataset.by;
+  byBtns.forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  if (!editing) setAuthor(formBy);
+}));
 
 const isNotes = id => !!themes.find(t => t.id === id)?.notes;
 function syncFormFields() {
@@ -1454,21 +1682,27 @@ function syncFormFields() {
   placeForm();
 }
 sfGroup.addEventListener('change', syncFormFields);
-function openStarForm() {
+let editing = null;   // the star being changed, or null when adding a new one
+function openStarForm(star) {
   closeCard();
+  editing = star || null;
   sfGroup.replaceChildren(
     ...themes.map(t => new Option(t.name, t.id)),
-    new Option('New constellation…', NEW_THEME));
-  sfGroup.value = zoom.id && themes.some(t => t.id === zoom.id) ? zoom.id : (themes[0]?.id ?? NEW_THEME);
+    ...(editing ? [] : [new Option('New constellation…', NEW_THEME)]));
+  sfGroup.value = editing ? editing.group : zoom.id && themes.some(t => t.id === zoom.id) ? zoom.id : (themes[0]?.id ?? NEW_THEME);
   const d = new Date();
-  sfDate.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  sfTitle.value = ''; sfNote.value = ''; sfNew.value = '';
+  sfDate.value = editing ? editing.sort : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  sfTitle.value = editing ? editing.title : ''; sfNote.value = editing ? editing.note : ''; sfNew.value = '';
+  formBy = editing ? editing.by : author;
+  byBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.by === formBy)));
+  starForm.querySelector('.card-date').textContent = editing ? 'Change this star' : 'A new star';
+  document.getElementById('sfSave').textContent = editing ? 'Save changes' : 'Save star';
   starForm.hidden = false;
   starBtn.setAttribute('aria-pressed', 'true');
   syncFormFields();
   (sfTitleWrap.hidden ? sfNote : sfTitle).focus({ preventScroll: true });
 }
-function closeStarForm() { starForm.hidden = true; starBtn.setAttribute('aria-pressed', 'false'); }
+function closeStarForm() { starForm.hidden = true; editing = null; starBtn.setAttribute('aria-pressed', 'false'); }
 function placeForm() {
   if (starForm.hidden) return;
   starForm.style.left = Math.max(8, (W - starForm.offsetWidth) / 2) + 'px';
@@ -1482,10 +1716,11 @@ starForm.addEventListener('submit', async e => {
   if (!sfDate.value || !sfNote.value.trim() || (!notes && !sfTitle.value.trim()) || (g === NEW_THEME && !sfNew.value.trim())) return;
   const save = document.getElementById('sfSave');
   save.disabled = true;
-  const saved = await saveStar({ group: g, newName: sfNew.value.trim(), sort: sfDate.value,
-    title: notes ? '' : sfTitle.value.trim(), note: sfNote.value.trim(), by: author });
+  const fields = { group: g, newName: sfNew.value.trim(), sort: sfDate.value,
+    title: notes ? '' : sfTitle.value.trim(), note: sfNote.value.trim(), by: formBy };
+  const saved = editing ? await updateStar(editing, fields) : await saveStar(fields);
   save.disabled = false;
-  if (saved) { closeStarForm(); if (zoom.id !== saved) zoomTo(saved); }
+  if (saved) { const was = editing; closeStarForm(); editing = null; if (zoom.id !== saved) zoomTo(saved); else if (was) openCard(was); }
 });
 
 codeInput.addEventListener('input', () => {
@@ -1630,6 +1865,29 @@ function rebuildSkyButtons() {
 memLayer.hidden = true;
 
 // which overlay controls exist right now
+const sendBtns = [...document.querySelectorAll('.sendStar')], backupBtn = document.getElementById('backupBtn');
+
+/* ---------- backup ----------
+   Everything, readable, in one file on this device: the page's memories and themes, every star and
+   constellation added from the sky, plus the encrypted rows exactly as stored, in case they're ever needed. */
+function backup() {
+  const today = todayISO();
+  const data = {
+    about: 'A readable backup of the night sky. Keep it somewhere private.',
+    exported: new Date().toISOString(),
+    themes,
+    memories: sealedList.map(({ group, sort, date, title, note, by }) => ({ group, sort, date, title, note, by })),
+    stars: liveStars.map(({ id, group, sort, date, title, note, by }) => ({ id, group, sort, date, title, note, by })),
+    encryptedRows: loadJSON(ROWS_KEY, []),
+  };
+  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  const a = Object.assign(document.createElement('a'), { href: url, download: `night-sky-backup-${today}.json` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast('Backup saved to your downloads');
+}
+backupBtn.addEventListener('click', backup);
+
 function syncOverlay() {
   const up = view === 'sky' && camP === 1;
   const showMem = up && lock.state === 'open', showCode = up && (lock.state === 'locked' || lock.state === 'checking');
@@ -1641,6 +1899,11 @@ function syncOverlay() {
   // asked once per device, right after the first unlock
   const askWho = up && lock.state === 'open' && !!unlockKey && !me && starForm.hidden;
   if (whoCard.hidden === askWho) whoCard.hidden = !askWho;
+  // sending a shooting star only makes sense while the other one is here, in the garden or the sky
+  const canSend = !!unlockKey && presence.others.size > 0 && camP === 1;
+  for (const b of sendBtns) if (b.hidden === canSend) b.hidden = !canSend;
+  const canBackup = up && lock.state === 'open' && !!unlockKey;
+  if (backupBtn.hidden === canBackup) backupBtn.hidden = !canBackup;
   const zg = zoom.id && zoom.p === 1 ? groups.find(g => g.id === zoom.id) : null;
   const canRead = showMem && !!zg && zg.stars.length > 1;
   if (readBtn.hidden === canRead) readBtn.hidden = !canRead;
@@ -1710,9 +1973,22 @@ function openCard(m) {
   const title = document.getElementById('cardTitle');
   title.textContent = m.title; title.hidden = !m.title;
   document.getElementById('cardNote').textContent = m.note;
+  // stars added from the sky can be changed or removed by anyone with the code; the page's own memories can't
+  cardActions.hidden = reading.on || m.id == null || !m.nonce || !db;
+  cardConfirm.hidden = true;
   card.hidden = false;
   placeOverlay();
 }
+const cardActions = document.getElementById('cardActions'), cardConfirm = document.getElementById('cardConfirm');
+document.getElementById('cardEdit').addEventListener('click', e => { e.stopPropagation(); const s = openStar; if (s) openStarForm(s); });
+document.getElementById('cardDelete').addEventListener('click', e => { e.stopPropagation(); cardActions.hidden = true; cardConfirm.hidden = false; placeOverlay(); });
+document.getElementById('cardNo').addEventListener('click', e => { e.stopPropagation(); cardConfirm.hidden = true; cardActions.hidden = false; });
+document.getElementById('cardYes').addEventListener('click', async e => {
+  e.stopPropagation();
+  const s = openStar;
+  if (s && await deleteStar(s)) closeCard();
+  else { cardConfirm.hidden = true; cardActions.hidden = false; }
+});
 function closeCard(refocus) {
   if (!openStar && card.hidden) return;
   const was = openStar;
@@ -1734,9 +2010,10 @@ async function connect() {
   try {
     await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js');
     db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    loadStars();
+    if (starsReady) goLive(); else loadStars();
   } catch (e) {
     db = null;
+    loadStars();   // no connection: open what this device already has
   }
 }
 
@@ -2002,7 +2279,7 @@ function updateVisitor(dt) {
     const step = Math.min(d, (RM ? 5 : 8) * dt);
     visitor.x += dx / (d || 1) * step + Math.sin(t * 3.1) * dt * 2.2;
     visitor.y += dy / (d || 1) * step + Math.cos(t * 2.3) * dt * 1.2;
-    if (d < .35) visitor.state = 'resting';
+    if (d < .35) { visitor.state = 'resting'; chime(79); }   // one soft note as it lands
   } else if (visitor.state === 'resting') { visitor.x = px; visitor.y = py; }
   else if (visitor.state === 'leaving') {
     visitor.y -= 5 * dt; visitor.x += Math.sin(t * 2) * dt * 3;
@@ -2017,7 +2294,11 @@ function drawVisitor() {
       if (m.text[i] !== ' ') put(m.c - m.text.length / 2 + i, m.r - age * .7, m.text[i], rgbs(mixc(BG, MEM, a)));
   }
   if (visitor.state === 'away') return;
-  const tintV = visitor.who === 'teri' ? TERI : GOLD, glow = .6 + .4 * Math.sin(t * 2.4);
+  const tintV = visitor.who === 'teri' ? TERI : GOLD;
+  // when they tap your firefly on their screen, theirs sparkles on yours
+  const blink = visitor.blink != null && t - visitor.blink < 1.6 ? 1 - (t - visitor.blink) / 1.6 : 0;
+  const glow = Math.min(1, .6 + .4 * Math.sin(t * 2.4) + blink);
+  if (blink) sparkle(visitor.x, visitor.y, (t - visitor.blink) * .9, tintV, cw / chH);
   if (visitor.state === 'resting') {
     putE(visitor.x - 1, visitor.y, '.', rgbs(mixc(BG, tintV, .25 * glow)));
     putE(visitor.x + 1, visitor.y, '.', rgbs(mixc(BG, tintV, .25 * glow)));
@@ -2032,6 +2313,7 @@ function overVisitor(p) {
 function greetVisitor() {
   if (hereMsgs.some(m => t - m.born < 1.5) || !stoneRect) return;
   hereMsgs.push({ text: `${NAMES[visitor.who] || 'Someone'} is here, too!`, born: t, c: stoneRect.c0 + 6, r: stoneRect.r0 - 2 });
+  signal('blink');   // and on their screen, your firefly sparkles back
 }
 
 function overBox(p) {
@@ -2061,7 +2343,17 @@ stage.addEventListener('pointermove', e => {
 });
 // a sideways swipe while zoomed in moves to the neighbouring constellation
 let swipe = null;
+// letting go of the tombstone: a quick tap goes up to the sky, a hold already showed the days
+function releaseStone(go) {
+  if (!stonePress) return;
+  clearTimeout(stonePress.timer);
+  const tapped = !stonePress.fired;
+  stonePress = null;
+  if (tapped && go) goSky();
+}
+addEventListener('pointercancel', () => releaseStone(false));
 stage.addEventListener('pointerup', e => {
+  releaseStone(true);
   if (!swipe || view !== 'sky') { swipe = null; return; }
   const p = local(e), dx = p.x - swipe.x, dy = p.y - swipe.y;
   if (zoom.id && zoom.p === 1 && Math.abs(dx) > 60 && Math.abs(dy) < 50 && performance.now() - swipe.t < 700) stepZoom(dx < 0 ? 1 : -1);
@@ -2088,7 +2380,12 @@ stage.addEventListener('pointerdown', e => {
   }
   if (overVisitor(p)) { greetVisitor(); return; }
   if (overBox(p)) { music.playing ? stopMusic() : playMusic(); return; }
-  if (overStone(p)) { goSky(); return; }
+  if (overStone(p)) {
+    // a tap goes up to the sky; holding shows the days together instead
+    clearTimeout(stonePress?.timer);
+    stonePress = { fired: false, timer: setTimeout(() => { if (stonePress) { stonePress.fired = true; stoneHold = T; } }, 450) };
+    return;
+  }
   plant(clamp(cx / cols, .02, .98), chosen, { depth: 1 });
 });
 
@@ -2168,6 +2465,9 @@ if (document.fonts) document.fonts.load(`14px "IBM Plex Mono"`).then(resize, () 
 if (location.hash === '#sky') goSky(true);
 restoreUnlock();
 connect();
+// keep a copy on the device so the garden opens offline (only where browsers allow it: https and localhost)
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost'))
+  navigator.serviceWorker.register('sw.js').catch(() => {});
 requestAnimationFrame(frame);
 })();
 </script>
