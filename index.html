@@ -95,6 +95,15 @@ button.link:hover{border:0;color:var(--bone)}
 button.link.danger{color:#c4566c}
 .whocard{width:auto;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center}
 .whocard .seg{justify-content:center;margin-top:8px}
+.namecard{width:min(320px,calc(100% - 16px));left:50%;top:50%;transform:translate(-50%,-50%);max-height:calc(100% - 16px);overflow:auto}
+.namecard .seg{margin-top:10px}
+.offers{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.offers:empty::before{content:"No names offered yet.";font-size:14px;color:var(--ash)}
+.offer{font-size:15px;padding:5px 9px;border-left:3px solid var(--c)}
+.offer small{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;color:var(--ash)}
+.name-status{margin:8px 0 0;font-size:14px;line-height:1.4;color:var(--ash);min-height:1.4em}
+.petname{width:10em;font-family:var(--f-body);font-size:16px;color:var(--bone);background:var(--bg);border:1px solid var(--line);border-radius:2px;padding:6px 8px}
+.petname:focus-visible{outline:1px solid var(--gold);outline-offset:0}
 .starform{width:min(300px,calc(100% - 16px));max-height:calc(100% - 16px);overflow:auto}
 .fld{display:grid;gap:4px;margin:0 0 10px}
 .fld>span{font-family:var(--f-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--ash)}
@@ -182,6 +191,19 @@ button:disabled{opacity:.5;cursor:default}
     </div>
     <button class="nav prev" id="navPrev" aria-label="Previous constellation" hidden><span>&lt;</span></button>
     <button class="nav next" id="navNext" aria-label="Next constellation" hidden><span>&gt;</span></button>
+    <form class="card namecard" id="nameCard" autocomplete="off" hidden>
+      <p class="card-date" id="nameTitle">Let's name her</p>
+      <div class="offers" id="petOffers" role="listbox" aria-label="Names offered so far"></div>
+      <p class="name-status" id="nameStatus"></p>
+      <div class="seg">
+        <input type="text" id="petName" maxlength="16" aria-label="A name to offer" placeholder="A name…" class="petname">
+        <button type="submit">Offer name</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="link" id="nameClose">Not now</button>
+        <button type="button" class="primary" id="nameDecide" disabled>Decided!</button>
+      </div>
+    </form>
     <button class="down" id="down" aria-label="Back to the garden" inert><span>v</span></button>
     <div class="toast" id="toast" hidden></div>
   </div>
@@ -209,6 +231,12 @@ button:disabled{opacity:.5;cursor:default}
       <button id="readBtn" aria-pressed="false" hidden>Read slowly</button>
       <button id="addStar" aria-pressed="false" hidden>Add a star</button>
       <button id="backupBtn" hidden>Back up</button>
+    </div>
+    <div class="ctl ctl-sky" id="ctlPond" inert>
+      <button id="petFeed" hidden>Feed</button>
+      <button id="petPlay" hidden>Play</button>
+      <button id="petNameBtn" hidden>Name her</button>
+      <button id="pondBack">Back to the garden</button>
     </div>
   </footer>
 </div>
@@ -1028,7 +1056,7 @@ function updateGarden(dt) {
   stoneGlow += ((stoneHover ? 1 : special ? .7 + pulse * .3 : pulse * .75) - stoneGlow) * Math.min(1, dt * 4);
   const showDays = stoneHover || special || (stoneHold != null && T - stoneHold < 3);
   daysAlpha += ((showDays ? .7 : 0) - daysAlpha) * Math.min(1, dt * 2.5);
-  updateMusicBox(dt); updateVisitor(dt);
+  updateMusicBox(dt); updateVisitor(dt); updateGardenPond(dt);
 }
 
 function updateSky(dt) {
@@ -1106,6 +1134,7 @@ function resetReveal() { for (const g of groups) g.reveal = 0; }
 let moonGlow = { x: 0, y: 0, r: 1 };
 function compose() {
   gch.fill(''); gcl.fill('');
+  if (view === 'pond') { setPlane(0, 0); drawPondScene(); drawBubbleCurtain(); moonGlow = { x: -9999, y: -9999, r: 1 }; return; }
   const far = farShift(), near = nearShift();
 
   setPlane(0, far);
@@ -1183,7 +1212,9 @@ function compose() {
       if (h2 < .25) put(c, ground + 1, h2 < .07 ? ':' : '.', g1);
       if (hash(c, 11) < .12) put(c, ground + 2, '.', g2);
     }
+    drawGardenPond();   // set into the ground, so drawn after it
   }
+  drawBubbleCurtain();
 }
 
 /* the hour, in the colour of the sky: a whisper of tint low on the horizon that follows the viewer's
@@ -1233,11 +1264,15 @@ function render() {
   const vg = ctx.createRadialGradient(W / 2, H * .45, Math.min(W, H) * .35, W / 2, H * .45, Math.max(W, H) * .8);
   vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.5)');
   ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  // going into or out of the pond: a moment of darkness
+  if (pond.fade > 0) { ctx.fillStyle = `rgba(11,9,14,${(pond.fade * .55).toFixed(3)})`; ctx.fillRect(0, 0, W, H); }
 }
 
 function frame(now) {
   const dt = Math.min(.05, (now - last) / 1000); last = now; T += dt;
   if (view === 'garden') { t += dt; updateGarden(dt); }
+  else if (view === 'pond') updatePond(dt);
+  updatePondFade(dt);
   updateSky(dt); updateReading(dt); musicDistance(); releaseNotes(); compose(); render(); placeOverlay();
   requestAnimationFrame(frame);
 }
@@ -1378,6 +1413,11 @@ async function addRow(row, quiet) {
   try {
     const d = await openRow(row);
     if (row.id != null && starIds.has(row.id)) return false;
+    if (d.kind === 'pet') {   // the axolotl's shared diary, not a star
+      if (row.id != null) starIds.add(row.id);
+      takePetRow(row, d);
+      return false;
+    }
     if (d.kind === 'theme') {
       const t = cleanTheme(d);
       if (!t || themes.some(x => x.id === t.id)) return false;
@@ -1405,6 +1445,7 @@ async function changeRow(row) {
   } catch (e) {}
 }
 function dropRow(id) {
+  petRows = petRows.filter(p => p.id !== id);
   const i = liveStars.findIndex(x => x.id === id);
   if (i < 0) return;
   if (openStar === liveStars[i]) closeCard();
@@ -1462,6 +1503,7 @@ async function resync() {
   saveJSON(ROWS_KEY, rows);
   const ids = new Set(rows.map(r => r.id));
   for (const s of [...liveStars]) if (s.id != null && !ids.has(s.id)) dropRow(s.id);
+  petRows = petRows.filter(p => p.id == null || ids.has(p.id));
   for (const row of rows) {
     const s = liveStars.find(x => x.id === row.id);
     if (!s) await addRow(row, true);
@@ -1498,6 +1540,8 @@ async function flushOutbox() {
       if (res.error) break;   // offline or busy: try again later
       const local = liveStars.find(s => s.id == null && s.ct === item.ct);
       if (local) { local.id = res.data.id; starIds.add(res.data.id); }
+      const localPet = petRows.find(p => p.id == null && p.ct === item.ct);
+      if (localPet) localPet.id = res.data.id;
       else starIds.add(res.data.id);
       box = box.slice(1); saveJSON(OUTBOX_KEY, box);
     }
@@ -1889,6 +1933,7 @@ function backup() {
 backupBtn.addEventListener('click', backup);
 
 function syncOverlay() {
+  syncPond();
   const up = view === 'sky' && camP === 1;
   const showMem = up && lock.state === 'open', showCode = up && (lock.state === 'locked' || lock.state === 'checking');
   if (memLayer.hidden === showMem) memLayer.hidden = !showMem;
@@ -1997,7 +2042,7 @@ function closeCard(refocus) {
 }
 
 function updateCursor() {
-  stage.style.cursor = view === 'sky' ? 'default' : (stoneHover || boxHover ? 'pointer' : 'crosshair');
+  stage.style.cursor = view !== 'garden' ? 'default' : (stoneHover || boxHover || pondHover ? 'pointer' : 'crosshair');
 }
 
 /* ---------- the shared database (stars added from the sky) ---------- */
@@ -2336,6 +2381,393 @@ function overBox(p) {
   return c >= boxRect.c0 && c < boxRect.c1 && r >= boxRect.r0 && r < boxRect.r1 + 1;
 }
 
+/* ---------- the pond ----------
+   A little moonlit pond set into the corner of the graveyard. Anyone sees the water; once the sky has
+   been unlocked on this device an axolotl lives in it. Tapping the pond fades down beneath the surface:
+   feed her, play (she chases a little light you move with a tap), or tap her for a cuddle. She never gets
+   ill and never minds being left alone; she sleeps in the small hours, drifts up when peckish, and dances
+   to the music box. Her name and the last thing each of you did with her are shared as encrypted rows in
+   the stars table ({kind:'pet', action, by, at, name?}); only the newest row of each action is kept. */
+let pondRect = null, pondHover = false;
+const pond = { fade: 0, dir: 0, to: null, t: 0, peek: 0, peekAt: 12 };
+let petRows = [];   // { id, nonce, ct, d: { action, by, at, name } }
+const ax = { x: 0, y: 0, dir: 1, tx: 0, ty: 0, retarget: 0, happy: 0, blink: 0, wake: 0, placed: false };
+let pellets = [], hearts = [], bubbles = [], zs = [], lure = null, lureHits = 0;
+const petRecorded = {};
+const PET_BODY = [236, 152, 174], PET_FRILL = [246, 112, 152], WATER = [92, 116, 166], REED = [56, 98, 72];
+
+const petLatest = action => petRows.filter(p => p.d.action === action).sort((a, b) => b.d.at - a.d.at)[0]?.d || null;
+const petName = () => petLatest('name')?.name || null;
+const sleepyHour = () => { const h = new Date().getHours(); return h >= 3 && h < 8; };
+function agoText(ms) {
+  const m = Math.round(ms / 6e4);
+  if (m < 2) return 'just now';
+  if (m < 60) return `${m} minutes ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return h === 1 ? 'an hour ago' : `${h} hours ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+// "Teri fed Pip 2 hours ago": the newest of the three things either of you can do
+function petLine() {
+  const verbs = { feed: 'fed', pet: 'cuddled', play: 'played with' };
+  const last = ['feed', 'pet', 'play'].map(petLatest).filter(Boolean).sort((a, b) => b.at - a.at)[0];
+  if (!last) return '';
+  return `${NAMES[last.by] || 'Someone'} ${verbs[last.action]} ${petName() || 'the axolotl'} ${agoText(Date.now() - last.at)}`;
+}
+
+// a pet row arriving (from this device, the other one, or the saved copy)
+function takePetRow(row, d) {
+  const mine = petRows.find(p => p.ct === row.ct);
+  if (mine) { if (row.id != null) mine.id = row.id; return; }
+  if (row.id != null && petRows.some(p => p.id === row.id)) return;
+  petRows.push({ id: row.id ?? null, nonce: row.nonce || null, ct: row.ct, d });
+}
+async function recordPet(action, extra = {}) {
+  if (!unlockKey) return null;
+  const careful = ['feed', 'pet', 'play'].includes(action);
+  // a cuddle every few seconds doesn't need saving every time; once in a while is enough
+  if (careful && Date.now() - (petRecorded[action] || 0) < 10 * 6e4) return null;
+  petRecorded[action] = Date.now();
+  const d = { action, by: me || author, at: Date.now(), ...extra };
+  const row = await sealRow({ kind: 'pet', ...d });
+  petRows.push({ id: null, nonce: row.nonce, ct: row.ct, d });
+  await queueRow(row);
+  // keep only the newest of each kind: the latest feed/pet/play/name, and each person's latest pick
+  if (careful || action === 'name') await prunePet(p => p.d.action === action && p.ct !== row.ct);
+  if (action === 'decide') await prunePet(p => p.d.action === 'decide' && p.d.by === d.by && p.ct !== row.ct);
+  return d;
+}
+async function prunePet(which) {
+  if (!db) return;
+  for (const old of petRows.filter(p => which(p) && p.id != null && p.nonce)) {
+    try {
+      const { data } = await db.rpc('delete_star', { p_id: old.id, p_token: await editToken(old.nonce) });
+      if (data) petRows = petRows.filter(p => p !== old);
+    } catch (e) {}
+  }
+}
+
+/* naming her, together: either of you offers names, and a name is hers only once you've both
+   picked the same one. A rename starts a fresh round; the round is everything since her last name. */
+const otherOf = who => who === 'teri' ? 'alex' : 'teri';
+function namingRound() {
+  const since = petLatest('name')?.at || 0;
+  const inRound = a => petRows.filter(p => p.d.action === a && p.d.at > since).map(p => p.d).sort((x, y) => x.at - y.at);
+  const offers = [], seen = new Set();
+  for (const o of inRound('offer')) { const k = o.name.toLowerCase(); if (!seen.has(k)) { seen.add(k); offers.push(o); } }
+  const picks = {};
+  for (const dcd of inRound('decide')) picks[dcd.by] = dcd.name;
+  return { offers, picks };
+}
+let pickedName = null, nameOpen = false, nameDismissed = false, nameSig = '';
+async function offerName(name) {
+  if (!name || namingRound().offers.some(o => o.name.toLowerCase() === name.toLowerCase())) { pickedName = name || pickedName; return; }
+  pickedName = name;
+  await recordPet('offer', { name });
+}
+async function decideName() {
+  if (!pickedName) return;
+  const mine = me || author;
+  const d = await recordPet('decide', { name: pickedName });
+  if (!d) return;
+  // if the other one already picked this same name, she's named
+  const { picks } = namingRound();
+  if (picks[otherOf(mine)] && picks[otherOf(mine)].toLowerCase() === pickedName.toLowerCase()) {
+    const since = petLatest('name')?.at || 0;
+    await recordPet('name', { name: pickedName });
+    await prunePet(p => (p.d.action === 'offer' || p.d.action === 'decide') && p.d.at > since);
+    nameOpen = false; pickedName = null;
+    hearts.push({ x: ax.x, y: ax.y - 2, born: pond.t }); ax.happy = 4; chime(84);
+    toast(`She's called ${petName()} now`);
+  }
+}
+function renderNameCard() {
+  const { offers, picks } = namingRound(), mine = me || author, other = otherOf(mine);
+  const sig = JSON.stringify([offers.map(o => o.name + o.by), picks, pickedName, petName()]);
+  if (sig === nameSig) return;
+  nameSig = sig;
+  document.getElementById('nameTitle').textContent = petName() ? `A new name for ${petName()}?` : "Let's name her";
+  const list = document.getElementById('petOffers');
+  list.replaceChildren(...offers.map(o => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'offer'; b.setAttribute('role', 'option');
+    b.style.setProperty('--c', o.by === 'teri' ? 'rgb(236,152,174)' : 'rgb(212,172,96)');
+    b.setAttribute('aria-pressed', String(pickedName === o.name));
+    const who = Object.entries(picks).filter(([, n]) => n.toLowerCase() === o.name.toLowerCase()).map(([w]) => NAMES[w]);
+    b.append(o.name);
+    if (who.length) { const s = document.createElement('small'); s.textContent = ' picked by ' + who.join(' & '); b.append(s); }
+    b.addEventListener('click', () => { pickedName = o.name; nameSig = ''; renderNameCard(); });
+    return b;
+  }));
+  const status = document.getElementById('nameStatus');
+  const myPick = picks[mine], theirPick = picks[other];
+  status.textContent = myPick && theirPick ? `You picked ${myPick}; ${NAMES[other]} picked ${theirPick}. Pick the same one to decide.`
+    : myPick ? `You picked ${myPick}. Waiting for ${NAMES[other]}.`
+    : theirPick ? `${NAMES[other]} picked ${theirPick}. Pick it too to make it hers.`
+    : offers.length ? 'Tap a name, then Decided! when it feels right.' : `Offer a name, then wait for ${NAMES[other]}'s ideas too.`;
+  document.getElementById('nameDecide').disabled = !pickedName || myPick === pickedName;
+}
+
+/* in the garden: three rows of water set into the ground, a lily pad, the moon's glint */
+function drawGardenPond() {
+  const w = clamp(Math.round(cols * .2), 12, 20), c0 = Math.max(1, Math.round(cols * .05)), top = ground - 1;
+  pondRect = { c0, c1: c0 + w, r0: top - 2, r1: top + 2 };
+  const lift = pondHover ? .18 : 0;
+  // sits on the ground line, so it reads clearly above the darker edge of the screen
+  for (let r = 0; r < 3; r++) {
+    const inset = r === 1 ? 0 : 1, row = top + r;
+    for (let c = c0 + inset; c < c0 + w - inset; c++) {
+      const edgeL = c === c0 + inset, edgeR = c === c0 + w - inset - 1;
+      let ch, col;
+      if (edgeL || edgeR) { ch = r === 0 ? '.' : r === 1 ? (edgeL ? '(' : ')') : "'"; col = mixc(BG, [120, 126, 108], .6 + lift); }
+      else {
+        const v = vnoise(c * .45 + t * .5, r * 3);
+        ch = r === 0 ? '_' : v > .55 ? '~' : '-'; col = mixc(BG, WATER, .42 + .25 * v + lift);
+      }
+      put(c, row, ch, rgbs(col));
+    }
+  }
+  put(c0 + 3, top + 1, 'o', rgbs(mixc(BG, [86, 132, 82], .85)));   // a lily pad
+  if (Math.sin(t * 1.3) > -.2) put(c0 + Math.round(w * .65), top + 1, '*', rgbs(mixc(BG, MOON, .5)));   // the moon in the water
+  // two reeds at the far edge
+  for (const [dc, h] of [[w - 2, 3], [w - 1, 2]]) for (let k = 1; k <= h; k++)
+    put(c0 + dc + (k === h ? Math.round(Math.sin(t + dc) * .4) : 0), top - k + 1, k === h ? ')' : '|', rgbs(mixc(BG, REED, .65)));
+  // now and then, if she lives here on this device, a little pink face peeks up
+  if (unlockKey && pond.peek > 0) put(c0 + Math.round(w * .4), top + 1, '^', rgbs(mixc(BG, PET_BODY, Math.min(1, pond.peek) * .95)));
+}
+function overPond(p) {
+  if (!pondRect || cam !== 0) return false;
+  const c = (p.x - ox) / cw, r = (p.y - oy) / chH;
+  return c >= pondRect.c0 && c < pondRect.c1 && r >= pondRect.r0 && r < pondRect.r1 + 1;
+}
+function updateGardenPond(dt) {
+  pond.peekAt -= dt;
+  if (pond.peekAt <= 0) { pond.peek = 2.2; pond.peekAt = rand(18, 34); }
+  pond.peek = Math.max(0, pond.peek - dt);
+}
+
+/* going in and out: a short fade through the dark */
+const ctlPond = document.getElementById('ctlPond'), nameCard = document.getElementById('nameCard');
+function enterPond() {
+  if (view !== 'garden' || cam !== 0 || pond.dir) return;
+  pond.dir = 1; pond.to = 'pond';
+}
+function leavePond() {
+  if (view !== 'pond' || pond.dir) return;
+  pond.dir = 1; pond.to = 'garden';
+}
+function updatePondFade(dt) {
+  if (pond.dir === 1) {
+    pond.fade = Math.min(1, pond.fade + dt / (RM ? .2 : .45));
+    if (pond.fade === 1) {
+      if (pond.to === 'pond') {
+        view = 'pond'; ctlGarden.inert = true; ctlPond.inert = false;
+        pellets = []; hearts = []; lure = null; zs = [];
+        nameOpen = false; nameDismissed = false; nameSig = '';
+        if (!ax.placed) { ax.x = cols * .5; ax.y = rows * .62; ax.placed = true; }
+        ax.retarget = 0;
+      } else {
+        view = 'garden'; ctlPond.inert = true; ctlGarden.inert = false; nameCard.hidden = true;
+      }
+      updateCursor();
+      pond.dir = -1;
+    }
+  } else if (pond.dir === -1) {
+    pond.fade = Math.max(0, pond.fade - dt / (RM ? .2 : .45));
+    if (pond.fade === 0) pond.dir = 0;
+  }
+}
+document.getElementById('pondBack').addEventListener('click', leavePond);
+
+/* going in or out, a rush of bubbles rises over everything and then floats away */
+function drawBubbleCurtain() {
+  const k = pond.fade;
+  if (k <= 0) return;
+  setPlane(0, 0);
+  const cover = k * (RM ? .3 : .5);
+  for (let c = 0; c < cols; c++) {
+    const scroll = T * (RM ? 3 : 9) * (.7 + hash(c, 5) * .8);   // each column rises at its own pace
+    for (let r = 0; r < rows; r++) {
+      const cell = Math.floor(r + scroll), h = hash(c * 3 + 1, cell);
+      if (h > cover) continue;
+      const ch = h < cover * .15 ? 'O' : h < cover * .55 ? 'o' : '.';
+      put(c, r, ch, rgbs(mixc(BG, [150, 180, 220], .35 + .4 * k)));
+    }
+  }
+}
+
+/* underwater */
+const surfaceRow = () => Math.max(3, Math.round(rows * .2));
+const waterBox = () => ({ x0: 5, x1: cols - 6, y0: surfaceRow() + 2, y1: rows - 4 });
+function updatePond(dt) {
+  pond.t += dt;
+  const here = !!unlockKey, wb = waterBox(), sleeping = here && sleepyHour() && ax.wake <= 0 && !music.playing;
+  ax.happy = Math.max(0, ax.happy - dt); ax.wake = Math.max(0, ax.wake - dt);
+  ax.blink = ax.blink > 0 ? ax.blink - dt : Math.random() < dt * .3 ? .15 : 0;
+  if (here) {
+    const fed = petLatest('feed'), peckish = !fed || Date.now() - fed.at > 12 * 36e5;
+    // where she wants to be
+    let tx = ax.tx, ty = ax.ty, speed = 6;
+    const food = pellets.filter(p => !p.eaten).sort((a, b) => Math.abs(a.x - ax.x) - Math.abs(b.x - ax.x))[0];
+    if (sleeping) { tx = cols * .5; ty = wb.y1; speed = 1.5; }
+    else if (food) { tx = food.x; ty = food.y; speed = 9; }
+    else if (lure) { tx = lure.x; ty = lure.y; speed = 10; }
+    else {
+      ax.retarget -= dt;
+      if (ax.retarget <= 0) {
+        ax.tx = rand(wb.x0, wb.x1);
+        ax.ty = peckish ? rand(wb.y0, wb.y0 + 3) : rand(wb.y0 + 2, wb.y1);   // peckish: up near the surface
+        ax.retarget = rand(3, 7);
+      }
+      tx = ax.tx; ty = ax.ty; speed = 4;
+    }
+    if (RM) speed *= .6;
+    const dx = tx - ax.x, dy = ty - ax.y;
+    ax.x += clamp(dx, -speed * dt, speed * dt);
+    ax.y += clamp(dy, -speed * .45 * dt, speed * .45 * dt);
+    if (Math.abs(dx) > .4) ax.dir = dx > 0 ? 1 : -1;
+    // eating, and catching the light
+    for (const p of pellets) if (!p.eaten && Math.abs(p.x - ax.x - ax.dir * 2) < 2 && Math.abs(p.y - ax.y) < 1) { p.eaten = true; ax.happy = 1.5; chime(88); }
+    if (lure && Math.abs(lure.x - ax.x - ax.dir * 2) < 2 && Math.abs(lure.y - ax.y) < 1.1) {
+      lureHits++; ax.happy = 1.2;
+      if (lureHits >= 4) { lure = null; ax.happy = 3; hearts.push({ x: ax.x, y: ax.y - 2, born: pond.t }); recordPet('play'); }
+      else lure = { x: rand(wb.x0, wb.x1), y: rand(wb.y0, wb.y1) };
+    }
+    if (sleeping && Math.random() < dt * .7) zs.push({ x: ax.x + ax.dir * 3, y: ax.y - 1, born: pond.t });
+    if (Math.random() < dt * (peckish ? .8 : .3)) bubbles.push({ x: ax.x + ax.dir * 3, y: ax.y - 1, vy: rand(1.5, 3) });
+  }
+  if (Math.random() < dt * .4) bubbles.push({ x: rand(2, cols - 2), y: rows - 2, vy: rand(1, 2.5) });
+  for (const b of bubbles) { b.y -= b.vy * dt; b.x += Math.sin(pond.t * 2 + b.vy * 9) * dt * .5; }
+  bubbles = bubbles.filter(b => b.y > surfaceRow() + .5);
+  for (const p of pellets) if (!p.eaten) { if (p.y < wb.y1 + 1) p.y += 1.4 * dt; else p.rest += dt; }
+  pellets = pellets.filter(p => !p.eaten && p.rest < 25);
+  hearts = hearts.filter(h => pond.t - h.born < 2.5);
+  zs = zs.filter(z => pond.t - z.born < 3);
+}
+
+function drawPondScene() {
+  const S = surfaceRow(), asp = cw / chH;
+  // above the water: a strip of night sky
+  for (let r = 0; r < S; r++) for (let c = 0; c < cols; c++)
+    if (hash(c + 3, r + 17) < .025) put(c, r, hash(c, r) < .2 ? '+' : '.', rgbs(mixc(BG, STAR, .15 + .2 * Math.sin(T * (.5 + hash(c, r)) + c))));
+  // the surface, and the moon broken up in it
+  for (let c = 0; c < cols; c++) {
+    const v = vnoise(c * .3 + pond.t * .5, 3);
+    put(c, S, v > .5 ? '~' : '-', rgbs(mixc(BG, WATER, .35 + .25 * v)));
+  }
+  for (let k = 0; k < 4; k++) {
+    const mc = cols * .74 + Math.sin(pond.t * 1.4 + k) * (1 + k * .6);
+    put(mc, S + 1 + k, k % 2 ? '-' : '=', rgbs(mixc(BG, MOON, .22 - k * .04)));
+  }
+  // lily pads resting on top, one with a flower
+  for (const [fx, flower] of [[.18, false], [.5, true], [.86, false]]) {
+    const c = Math.round(cols * fx);
+    for (let i = 0; i < 4; i++) put(c + i, S, '(__)'[i], rgbs(mixc(BG, [76, 118, 74], .75)));
+    if (flower) put(c + 1, S - 1, '*', rgbs(mixc(BG, PET_FRILL, .8)));
+  }
+  // drifting motes in the water
+  for (let r = S + 1; r < rows - 2; r++) for (let c = 0; c < cols; c++)
+    if (hash(c + 71, r + 13) < .012) putE(c + Math.sin(pond.t * .3 + r) * .8, r, '.', rgbs(mixc(BG, WATER, .22)));
+  // reeds rising from the bottom, swaying
+  for (let c = 2; c < cols - 2; c++) {
+    if (hash(c, 919) > .14) continue;
+    const h = 3 + Math.floor(hash(c, 920) * Math.min(9, rows * .25));
+    for (let k = 0; k < h; k++) {
+      const sway = Math.sin(pond.t * .8 + c * .7) * (k / h) * 1.4;
+      put(c + sway, rows - 3 - k, sway > .5 ? ')' : sway < -.5 ? '(' : '|', rgbs(mixc(BG, REED, .45 + .25 * (k / h))));
+    }
+  }
+  // the bottom: pebbles and silt
+  for (let c = 0; c < cols; c++) {
+    put(c, rows - 1, hash(c, 31) < .6 ? '_' : '.', rgbs(mixc(BG, [84, 74, 70], .45)));
+    if (hash(c, 37) < .18) put(c, rows - 2, 'oO.'[(hash(c, 41) * 3) | 0], rgbs(mixc(BG, [110, 104, 100], .45)));
+  }
+  for (const b of bubbles) put(b.x, b.y, b.y < S + 3 ? '.' : 'o', rgbs(mixc(BG, [150, 180, 220], .4)));
+  for (const p of pellets) put(p.x, p.y, 'o', rgbs(mixc(BG, GOLD, .85 * Math.min(1, 1 - p.rest / 25))));
+  if (lure) {
+    const g = .6 + .4 * Math.sin(pond.t * 5);
+    put(lure.x, lure.y, '*', rgbs(mixc(BG, GOLD, g)));
+    sparkle(lure.x, lure.y, (pond.t * .7) % 1.4, GOLD, asp);
+  }
+  if (unlockKey) drawAxolotl();
+  for (const z of zs) { const a = pond.t - z.born; put(z.x + Math.sin(a * 2), z.y - a * .8, 'z', rgbs(mixc(BG, MEM, .5 * (1 - a / 3)))); }
+  for (const h of hearts) { const a = pond.t - h.born, c = rgbs(mixc(BG, TERI, .9 * (1 - a / 2.5))); put(h.x, h.y - a * 1.2, '<', c); put(h.x + 1, h.y - a * 1.2, '3', c); }
+  // what happened last, softly at the top
+  const line = unlockKey ? petLine() : '';
+  for (let i = 0; i < line.length; i++) if (line[i] !== ' ') put(cols / 2 - line.length / 2 + i, 1, line[i], rgbs(mixc(BG, MEM, .38)));
+}
+
+// facing right: tail on the left, frilly gills above the head, two little legs below
+function drawAxolotl() {
+  const sleeping = sleepyHour() && ax.wake <= 0 && !music.playing, dance = music.playing && !sleeping;
+  const bob = dance ? Math.sin(pond.t * 7) * .6 : Math.sin(pond.t * 1.3) * .2;
+  const x = Math.round(ax.x), y = Math.round(ax.y + bob), d = ax.dir;
+  const eye = sleeping || ax.blink > 0 ? '-' : (ax.happy > 0 || dance ? '^' : 'o');
+  const head = `(${eye}${ax.happy > 0 || dance ? 'w' : '.'}${eye})`;
+  const tails = ['~~~', '-~~', '~-~', '~~-'], tf = tails[Math.floor(pond.t * (dance ? 10 : sleeping ? 1 : 4)) % 4];
+  const tail = d > 0 ? tf : [...tf].reverse().join('');
+  const body = rgbs(PET_BODY), frill = rgbs(PET_FRILL);
+  for (let i = 0; i < 5; i++) put(x - 2 + i, y, head[i], body);
+  for (let i = 0; i < 3; i++) put(d > 0 ? x - 5 + i : x + 3 + i, y, tail[i], body);
+  const gill = Math.sin(pond.t * (dance ? 8 : 3)) > 0 ? '\\|/' : '\\:/';
+  for (let i = 0; i < 3; i++) put(x - 1 + i, y - 1, gill[i], frill);
+  put(x - 2, y + 1, '"', body); put(x + 1, y + 1, '"', body);
+}
+
+function pondTap(cx, cy) {
+  const wb = waterBox();
+  if (!unlockKey) { bubbles.push({ x: cx, y: Math.max(cy, surfaceRow() + 1), vy: 2 }); return; }
+  ax.wake = 120;   // anything you do wakes her for a little while
+  if (Math.abs(cx - ax.x) < 4 && Math.abs(cy - ax.y) < 1.8) {
+    ax.happy = 2.5;
+    hearts.push({ x: ax.x, y: ax.y - 2, born: pond.t });
+    recordPet('pet');
+    return;
+  }
+  if (lure) { lure = { x: clamp(cx, wb.x0, wb.x1), y: clamp(cy, wb.y0, wb.y1) }; return; }
+  bubbles.push({ x: cx, y: Math.max(cy, surfaceRow() + 1), vy: 2 });
+}
+document.getElementById('petFeed').addEventListener('click', () => {
+  ax.wake = 120;
+  const S = surfaceRow();
+  for (let i = 0; i < 5; i++) pellets.push({ x: clamp(ax.x + rand(-10, 10), 4, cols - 5), y: S + 1 - i * .6, rest: 0 });
+  recordPet('feed');
+});
+document.getElementById('petPlay').addEventListener('click', () => {
+  ax.wake = 120;
+  const wb = waterBox();
+  lure = lure ? null : { x: rand(wb.x0, wb.x1), y: rand(wb.y0, wb.y1) };
+  lureHits = 0;
+});
+nameCard.addEventListener('submit', async e => {
+  e.preventDefault();
+  const input = document.getElementById('petName'), name = input.value.trim().slice(0, 16);
+  if (!name) return;
+  input.value = '';
+  await offerName(name);
+  nameSig = ''; renderNameCard();
+});
+document.getElementById('nameDecide').addEventListener('click', async () => { await decideName(); nameSig = ''; });
+document.getElementById('nameClose').addEventListener('click', () => { nameOpen = false; nameDismissed = true; });
+document.getElementById('petNameBtn').addEventListener('click', () => { nameOpen = !nameOpen; nameDismissed = !nameOpen; nameSig = ''; });
+function syncPond() {
+  const inPond = view === 'pond' && !pond.dir, here = !!unlockKey && starsReady;
+  // opens by itself while she has no name, or while either of you is in the middle of renaming her
+  const round = here ? namingRound() : { offers: [] };
+  const wanted = !petName() || round.offers.length > 0;
+  const show = inPond && here && (nameOpen || (wanted && !nameDismissed));
+  if (nameCard.hidden === show) { nameCard.hidden = !show; nameSig = ''; }
+  if (show) renderNameCard();
+  for (const id of ['petFeed', 'petPlay', 'petNameBtn']) { const b = document.getElementById(id); if (b.hidden === here) b.hidden = !here; }
+  const label = petName() ? 'Rename' : 'Name her';
+  const nb = document.getElementById('petNameBtn');
+  if (nb.textContent !== label) nb.textContent = label;
+  // Play turns into Stop playing while the little light is out, and back again when the game ends
+  const pb = document.getElementById('petPlay'), playing = !!lure;
+  if (pb.textContent !== (playing ? 'Stop playing' : 'Play')) { pb.textContent = playing ? 'Stop playing' : 'Play'; pb.setAttribute('aria-pressed', String(playing)); }
+}
+
 /* ---------- input ---------- */
 function toast(msg) {
   toastEl.textContent = msg; toastEl.hidden = false;
@@ -2352,8 +2784,8 @@ stage.addEventListener('pointermove', e => {
   const p = local(e);
   if (pointer.lastX !== null) gust = clamp(gust + (p.x - pointer.lastX) * (e.buttons ? .02 : .01), -6, 6);
   pointer.lastX = p.x; pointer.x = p.x; pointer.y = p.y; pointer.in = true;
-  const h = overStone(p), hb = overBox(p) || overVisitor(p);
-  if (h !== stoneHover || hb !== boxHover) { stoneHover = h; boxHover = hb; updateCursor(); }
+  const h = overStone(p), hb = overBox(p) || overVisitor(p), hp = overPond(p);
+  if (h !== stoneHover || hb !== boxHover || hp !== pondHover) { stoneHover = h; boxHover = hb; pondHover = hp; updateCursor(); }
 });
 // a sideways swipe while zoomed in moves to the neighbouring constellation
 let swipe = null;
@@ -2385,6 +2817,8 @@ stage.addEventListener('pointerdown', e => {
     stopReading(); closeCard();
     return;
   }
+  if (view === 'pond') { if (!pond.dir && nameCard.hidden) pondTap(cx, cy); return; }
+  if (pond.dir) return;
 
   pointer.x = p.x; pointer.y = p.y; pointer.lastX = p.x; pointer.in = e.pointerType === 'mouse';
   const asp = cw / chH;
@@ -2400,6 +2834,7 @@ stage.addEventListener('pointerdown', e => {
     stonePress = { fired: false, timer: setTimeout(() => { if (stonePress) { stonePress.fired = true; stoneHold = T; } }, 450) };
     return;
   }
+  if (overPond(p)) { enterPond(); return; }
   plant(clamp(cx / cols, .02, .98), chosen, { depth: 1 });
 });
 
@@ -2448,10 +2883,11 @@ downBtn.addEventListener('click', () => zoom.id ? zoomOut() : goGarden());
 addEventListener('keydown', e => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toLowerCase();
-  if (e.target === codeInput || e.target.closest?.('#starForm')) { if (k === 'escape') e.target.blur(); return; }
+  if (e.target === codeInput || e.target.closest?.('#starForm, #nameCard')) { if (k === 'escape') e.target.blur(); return; }
   // typing a digit at the lock goes into the code even if the box lost focus
   if (view === 'sky' && lock.state === 'locked' && !codeInput.hidden && /^[0-9]$/.test(k)) { codeInput.focus({ preventScroll: true }); return; }
   if (k === 'escape') {
+    if (view === 'pond') { if (!nameCard.hidden) nameCard.hidden = true; leavePond(); return; }
     if (reading.on) stopReading();
     else if (!starForm.hidden) closeStarForm();
     else if (!card.hidden) closeCard(true);
