@@ -170,7 +170,7 @@ button:disabled{opacity:.5;cursor:default}
       <label class="fld" id="sfNewWrap" hidden><span>Name of the new constellation</span><input type="text" id="sfNew" maxlength="24"></label>
       <label class="fld"><span>Date</span><input type="date" id="sfDate"></label>
       <label class="fld" id="sfTitleWrap"><span>Title</span><input type="text" id="sfTitle" maxlength="60"></label>
-      <label class="fld"><span>Note</span><textarea id="sfNote" maxlength="600" rows="5"></textarea></label>
+      <label class="fld"><span>Note</span><textarea id="sfNote" maxlength="1200" rows="5"></textarea></label>
       <div class="fld"><span>From</span>
         <div class="seg" id="sfBy">
           <button type="button" data-by="alex" aria-pressed="true">Alex</button>
@@ -1381,7 +1381,7 @@ const loadJSON = (k, d) => { try { return JSON.parse(localStorage.getItem(k) || 
 const saveJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
 function cleanStar(s) {
   if (!s || typeof s !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(s.sort) || !str(s.group, 40)) return null;
-  return { group: str(s.group, 40), sort: s.sort, date: fmtDate(s.sort), title: str(s.title, 60), note: str(s.note, 600), by: s.by === 'teri' ? 'teri' : 'alex' };
+  return { group: str(s.group, 40), sort: s.sort, date: fmtDate(s.sort), title: str(s.title, 60), note: str(s.note, 1200), by: s.by === 'teri' ? 'teri' : 'alex' };
 }
 function cleanTheme(t) {
   if (!t || typeof t !== 'object' || !str(t.id, 40) || !str(t.name, 24).trim()) return null;
@@ -1871,7 +1871,7 @@ addEventListener('pointerup', () => {
 });
 memLayer.addEventListener('click', e => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
 stage.addEventListener('wheel', e => {
-  if (view !== 'sky' || zoom.id || lock.state !== 'open') return;
+  if (view !== 'sky' || zoom.id || lock.state !== 'open' || e.target.closest?.('.card')) return;
   e.preventDefault();
   panTarget = null; panV = 0;
   pan = clamp(pan + (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) / cw * .6, 0, maxPan());
