@@ -453,10 +453,12 @@ function moonPhase() {
   return frac(days / 29.530588853);
 }
 let moonLight = 1;   // how much of the disc is lit, 0-1, for the glow
+function moonSpot() {
+  const asp = cw / chH, Rm = clamp(rows * .1, 2.5, 6);
+  return { asp, Rm, mx: cols - Math.max(7, cols * .15), my: Math.max(4, rows * .17), rx: Math.ceil(Rm * 1.45 / asp), ry: Math.ceil(Rm * 1.45) };
+}
 function drawMoon() {
-  const asp = cw / chH;
-  const mx = cols - Math.max(7, cols * .15), my = Math.max(4, rows * .17), Rm = clamp(rows * .1, 2.5, 6);
-  const rx = Math.ceil(Rm * 1.45 / asp), ry = Math.ceil(Rm * 1.45);
+  const { asp, Rm, mx, my, rx, ry } = moonSpot();
   const ramp = ' .:-=+*#%@';
   const ph = moonPhase(), waxing = ph < .5, cosPh = Math.cos(ph * Math.PI * 2);
   moonLight = (1 - cosPh) / 2;
@@ -483,6 +485,42 @@ function drawMoon() {
     if (ch !== ' ') put(mx + dx, my + dy, ch, rgbs(mixc(BG, MOON, .16 + .62 * lum)));
   }
   return { x: ox + mx * cw, y: oy + (my + farShift()) * chH, r: Rm * chH };
+}
+
+/* the countdown to midnight between 5 and 6 November, written large in star dust behind the moon's
+   side of the sky. It goes by the viewer's own clock and is gone once the moment has passed. */
+const COUNT_TO = new Date(2026, 10, 6).getTime();
+const BIG = {
+  0: ['01110', '10001', '10011', '10101', '11001', '10001', '01110'], 1: ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
+  2: ['01110', '10001', '00001', '00110', '01000', '10000', '11111'], 3: ['11110', '00001', '00001', '01110', '00001', '00001', '11110'],
+  4: ['00010', '00110', '01010', '10010', '11111', '00010', '00010'], 5: ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
+  6: ['00110', '01000', '10000', '11110', '10001', '10001', '01110'], 7: ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
+  8: ['01110', '10001', '10001', '01110', '10001', '10001', '01110'], 9: ['01110', '10001', '10001', '01111', '00001', '00010', '01100'],
+  ':': ['0', '0', '1', '0', '1', '0', '0'],
+};
+function drawCountdown() {
+  const left = Math.floor((COUNT_TO - Date.now()) / 1000);
+  if (left < 0) return;
+  const two = n => String(n).padStart(2, '0');
+  const txt = `${two(Math.floor(left / 3600))}:${two(Math.floor(left / 60) % 60)}:${two(left % 60)}`;
+  const dots = 39;   // the width of 00:00:00 in font dots
+  const { mx, my, rx, ry } = moonSpot(), beside = mx - rx - 4;
+  // beside the moon when the screen is wide enough for that, under it on a phone
+  const room = beside / dots >= 2 ? beside : cols - 4, sx = clamp(Math.floor(room / dots), 1, 4), sy = Math.max(1, Math.round(sx / 2));
+  const c0 = Math.round((room - dots * sx) / 2) + 2, r0 = room === beside ? Math.max(2, Math.round(my - 3.5 * sy)) : my + ry + 2;
+  let x = c0;
+  for (const ch of txt) {
+    const g = BIG[ch];
+    for (let gy = 0; gy < 7; gy++) for (let gx = 0; gx < g[gy].length; gx++) {
+      if (g[gy][gx] !== '1') continue;
+      for (let dy = 0; dy < sy; dy++) for (let dx = 0; dx < sx; dx++) {
+        const c = x + gx * sx + dx, r = r0 + gy * sy + dy, h = hash(c, r + 700);
+        const lum = .5 + .5 * Math.sin(T * (.4 + h) + h * 40);
+        put(c, r, h < .45 ? '+' : h < .75 ? '*' : h < .9 ? ':' : '#', rgbs(mixc(BG, MOON, .22 + .1 * lum)));
+      }
+    }
+    x += (g[0].length + 1) * sx;
+  }
 }
 
 function drawFlower(f) {
@@ -1145,6 +1183,7 @@ function compose() {
       put(s.c, s.r, s.ch, rgbs(mixc(BG, STAR, .12 + .42 * lum)));
     }
   }
+  if (far < rows + 1) drawCountdown();
   for (const m of meteors) {
     // head fades in then out; trail lingers a little after the head is gone
     const fade = clamp01(m.age / .12) * clamp01((m.life + .4 - m.age) / .5);
